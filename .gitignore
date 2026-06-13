@@ -9,6 +9,7 @@ dist/
 *.sqlite
 *.sqlite3
 *.db
+*.tmp
 coverage/
 tmp/
 temp/
@@ -16,6 +17,6 @@ temp/
 *.secrets
 *password*
 *connection-string*
+*bootstrap*.sql
 vercel-env*
 curl-output*
-

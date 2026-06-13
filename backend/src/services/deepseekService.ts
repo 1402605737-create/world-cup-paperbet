@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { query } from "../db.js";
+import { APP_SCHEMA, query } from "../db.js";
 
 const prohibitedTerms = [
   "稳赚",
@@ -58,7 +58,7 @@ async function saveCallLog(
   if (!process.env.DATABASE_URL) return;
   try {
     await query(
-      `insert into ai_call_logs (provider, model, request_id, fallback, response_json)
+      `insert into ${APP_SCHEMA}.ai_call_logs (provider, model, request_id, fallback, response_json)
        values ('deepseek', $1, $2, false, $3::jsonb)`,
       [model, requestId, JSON.stringify(responseJson)],
     );
@@ -126,4 +126,3 @@ export async function verifyDeepSeekConnection(): Promise<DeepSeekVerification> 
 
   throw lastError instanceof Error ? lastError : new Error("DeepSeek verification failed");
 }
-

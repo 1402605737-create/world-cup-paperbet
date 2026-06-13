@@ -2,6 +2,8 @@ import pg from "pg";
 
 const { Pool } = pg;
 
+export const APP_SCHEMA = "world_cup_paperbet";
+
 function sslConfig(connectionString: string) {
   if (/localhost|127\.0\.0\.1/i.test(connectionString)) {
     return undefined;
@@ -31,4 +33,3 @@ export async function query<T extends pg.QueryResultRow>(
   }
   return pool.query<T>(text, values);
 }
-
