@@ -7,6 +7,8 @@ export type StandardOdds = {
   kickoff_time: string;
   bookmaker: string;
   region: string;
+  home_team_flag_url: string | null;
+  away_team_flag_url: string | null;
   selections: Array<{ selection: "home" | "draw" | "away"; odds: number }>;
   data_source: "THE_ODDS_API";
 };
@@ -29,7 +31,7 @@ const eventSchema = z.object({
   ),
 });
 
-export async function fetchWorldCupOdds(): Promise<StandardOdds[]> {
+export async function fetchWorldCupOdds(flagsByName: Map<string, string> = new Map()): Promise<StandardOdds[]> {
   const apiKey = process.env.ODDS_API_KEY;
   if (!apiKey) throw new Error("真实赔率数据源尚未配置，无法加载世界杯赔率。");
 
@@ -71,6 +73,8 @@ export async function fetchWorldCupOdds(): Promise<StandardOdds[]> {
       kickoff_time: event.commence_time,
       bookmaker: bookmaker.title,
       region,
+      home_team_flag_url: flagsByName.get(event.home_team.toLowerCase()) || null,
+      away_team_flag_url: flagsByName.get(event.away_team.toLowerCase()) || null,
       selections,
       data_source: "THE_ODDS_API" as const,
     }];

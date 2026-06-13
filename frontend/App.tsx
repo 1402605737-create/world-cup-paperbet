@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Image,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -44,6 +45,8 @@ type Match = {
   status: "scheduled" | "live" | "finished";
   home_score: number | null;
   away_score: number | null;
+  home_team_flag_url: string;
+  away_team_flag_url: string;
 };
 
 type Odds = {
@@ -52,6 +55,8 @@ type Odds = {
   away_team: string;
   kickoff_time: string;
   bookmaker: string;
+  home_team_flag_url: string | null;
+  away_team_flag_url: string | null;
   selections: Array<{ selection: "home" | "draw" | "away"; odds: number }>;
 };
 
@@ -244,7 +249,7 @@ export default function App() {
 
         {page === "真实赛程" ? (
           <>
-            <SectionTitle caption="只展示供应商返回的真实数据">真实世界杯赛程与赔率</SectionTitle>
+            <SectionTitle caption="每日自动更新历史赛果，并读取当前真实赔率">真实世界杯数据</SectionTitle>
             <Pressable style={styles.primaryButton} onPress={loadLiveData} disabled={liveDataLoading}>
               <Text style={styles.primaryButtonText}>
                 {liveDataLoading ? "正在读取真实数据…" : "刷新真实数据"}
@@ -253,11 +258,8 @@ export default function App() {
             {liveDataLoading ? <ActivityIndicator color="#0d685a" size="large" /> : null}
             {matchesMessage ? <Text style={styles.dataMessage}>{matchesMessage}</Text> : null}
             {oddsMessage ? <Text style={styles.dataMessage}>{oddsMessage}</Text> : null}
-            {matches.map((match) => {
-              const matchOdds = odds.find(
-                (item) => item.home_team === match.home_team && item.away_team === match.away_team,
-              );
-              return (
+            <SectionTitle caption="来自 API-Football，包含国家旗帜">2022 世界杯历史赛果</SectionTitle>
+            {matches.map((match) => (
                 <View key={match.external_match_id} style={styles.matchCard}>
                   <View style={styles.matchMeta}>
                     <Text style={styles.matchStage}>{match.stage}</Text>
@@ -270,30 +272,63 @@ export default function App() {
                       })}
                     </Text>
                   </View>
-                  <Text style={styles.matchTeams}>{match.home_team}  对阵  {match.away_team}</Text>
+                  <View style={styles.teamsRow}>
+                    <View style={styles.teamBlock}>
+                      <Image source={{ uri: match.home_team_flag_url }} style={styles.flag} />
+                      <Text style={styles.teamName}>{match.home_team}</Text>
+                    </View>
+                    <Text style={styles.versus}>对阵</Text>
+                    <View style={styles.teamBlock}>
+                      <Image source={{ uri: match.away_team_flag_url }} style={styles.flag} />
+                      <Text style={styles.teamName}>{match.away_team}</Text>
+                    </View>
+                  </View>
                   {match.status === "finished" ? (
                     <Text style={styles.matchScore}>{match.home_score} : {match.away_score}</Text>
                   ) : null}
-                  {matchOdds ? (
-                    <View style={styles.oddsRow}>
-                      {matchOdds.selections.map((item) => (
-                        <View key={item.selection} style={styles.oddsCell}>
-                          <Text style={styles.oddsLabel}>
-                            {item.selection === "home" ? "主胜" : item.selection === "draw" ? "平局" : "客胜"}
-                          </Text>
-                          <Text style={styles.oddsValue}>{item.odds.toFixed(2)}</Text>
-                        </View>
-                      ))}
-                    </View>
-                  ) : (
-                    <Text style={styles.muted}>当前赔率供应商尚未提供该场比赛的胜平负赔率。</Text>
-                  )}
                 </View>
-              );
-            })}
+            ))}
             {!liveDataLoading && matches.length === 0 && !matchesMessage ? (
               <Text style={styles.dataMessage}>真实赛事供应商当前尚未返回比赛数据。</Text>
             ) : null}
+
+            <SectionTitle caption="来自 The Odds API，覆盖当前 2026 世界杯赛事">当前真实胜平负赔率</SectionTitle>
+            {odds.map((item) => (
+              <View key={item.external_event_id} style={styles.matchCard}>
+                <View style={styles.matchMeta}>
+                  <Text style={styles.matchStage}>{item.bookmaker}</Text>
+                  <Text style={styles.muted}>
+                    {new Date(item.kickoff_time).toLocaleString("zh-CN", {
+                      month: "numeric",
+                      day: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </Text>
+                </View>
+                <View style={styles.teamsRow}>
+                  <View style={styles.teamBlock}>
+                    {item.home_team_flag_url ? <Image source={{ uri: item.home_team_flag_url }} style={styles.flag} /> : null}
+                    <Text style={styles.teamName}>{item.home_team}</Text>
+                  </View>
+                  <Text style={styles.versus}>对阵</Text>
+                  <View style={styles.teamBlock}>
+                    {item.away_team_flag_url ? <Image source={{ uri: item.away_team_flag_url }} style={styles.flag} /> : null}
+                    <Text style={styles.teamName}>{item.away_team}</Text>
+                  </View>
+                </View>
+                <View style={styles.oddsRow}>
+                  {item.selections.map((selection) => (
+                    <View key={selection.selection} style={styles.oddsCell}>
+                      <Text style={styles.oddsLabel}>
+                        {selection.selection === "home" ? "主胜" : selection.selection === "draw" ? "平局" : "客胜"}
+                      </Text>
+                      <Text style={styles.oddsValue}>{selection.odds.toFixed(2)}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            ))}
           </>
         ) : null}
 
@@ -456,7 +491,11 @@ const styles = StyleSheet.create({
   matchCard: { backgroundColor: "#fffdf8", borderWidth: 1, borderColor: "#dedbd1", borderRadius: 18, padding: 18, gap: 12 },
   matchMeta: { flexDirection: "row", justifyContent: "space-between", gap: 12 },
   matchStage: { color: "#0d7565", fontWeight: "800", fontSize: 12 },
-  matchTeams: { color: "#173e37", fontSize: 18, fontWeight: "900", lineHeight: 25 },
+  teamsRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
+  teamBlock: { flex: 1, alignItems: "center", gap: 7 },
+  flag: { width: 42, height: 28, borderRadius: 4, resizeMode: "cover", backgroundColor: "#e6e3da" },
+  teamName: { color: "#173e37", fontSize: 14, fontWeight: "900", textAlign: "center" },
+  versus: { color: "#87918e", fontSize: 12, fontWeight: "700" },
   matchScore: { color: "#0d685a", fontSize: 24, fontWeight: "900" },
   oddsRow: { flexDirection: "row", gap: 8 },
   oddsCell: { flex: 1, backgroundColor: "#e7f2ef", borderRadius: 12, padding: 10, alignItems: "center", gap: 3 },

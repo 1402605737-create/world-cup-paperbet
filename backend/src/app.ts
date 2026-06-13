@@ -3,7 +3,7 @@ import express from "express";
 import { getAllowedOrigins, getConfigStatus } from "./config.js";
 import { APP_SCHEMA, query } from "./db.js";
 import { generateLearningGuide, verifyDeepSeekConnection } from "./services/deepseekService.js";
-import { getWorldCupMatches } from "./services/sportsDataService.js";
+import { getWorldCupMatches, syncWorldCupResults } from "./services/sportsDataService.js";
 import { getWorldCupOdds } from "./services/oddsDataService.js";
 
 const app = express();
@@ -73,6 +73,19 @@ app.get("/api/matches", async (_request, response) => {
     response.json({ matches: await getWorldCupMatches() });
   } catch (error) {
     response.status(503).json({ error: error instanceof Error ? error.message : "真实赛事服务暂不可用" });
+  }
+});
+
+app.get("/api/cron/sync-results", async (request, response) => {
+  const expected = process.env.CRON_SECRET;
+  if (!expected || request.headers.authorization !== `Bearer ${expected}`) {
+    response.status(401).json({ error: "未授权的每日同步请求" });
+    return;
+  }
+  try {
+    response.json({ status: "同步完成", ...(await syncWorldCupResults()) });
+  } catch (error) {
+    response.status(503).json({ error: error instanceof Error ? error.message : "每日同步失败" });
   }
 });
 

@@ -17,6 +17,7 @@
 - API-Football 真实世界杯赛程与赛果接入层
 - The Odds API 真实胜平负赔率接入层
 - 中文真实赛程与赔率页面
+- 每日自动同步 2022 世界杯历史赛果与国家旗帜
 - 独立 Supabase Schema 与最小权限应用角色
 - 独立 Vercel 前端与后端项目
 - 明确拒绝使用虚构赛程、赛果或赔率
@@ -63,7 +64,8 @@ npm run dev:frontend
 SPORTS_API_KEY=
 SPORTS_API_BASE_URL=https://v3.football.api-sports.io
 SPORTS_LEAGUE_ID=1
-SPORTS_SEASON=2026
+SPORTS_SEASON=2022
+CRON_SECRET=
 ODDS_API_KEY=
 ODDS_API_BASE_URL=https://api.the-odds-api.com
 ODDS_SPORT_KEY=soccer_fifa_world_cup
@@ -84,6 +86,8 @@ ODDS_FORMAT=decimal
 - RLS 策略仅面向 `world_cup_paperbet_app`
 
 生产启动时不会创建、修改、删除或迁移数据库对象。
+
+Vercel Cron 每天调用一次受 `CRON_SECRET` 保护的 `/api/cron/sync-results`，将 API-Football 返回的 2022 世界杯历史赛果和国家旗帜更新到当前项目独立 Schema。API-Football 免费套餐当前不允许访问 2026 赛季，因此 2026 当前赛事由 The Odds API 单独展示。
 
 ## 独立部署
 

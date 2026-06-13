@@ -36,7 +36,7 @@ export function getConfigStatus(): ConfigStatus {
       configured: sportsConfigured,
       provider: process.env.SPORTS_DATA_PROVIDER || "API_FOOTBALL",
       message: sportsConfigured
-        ? "API-Football 真实赛事数据源已配置。"
+        ? "API-Football 已配置，每日自动同步 2022 世界杯历史赛果与国家旗帜。"
         : "API-Football 免费密钥待配置，暂时无法加载真实世界杯赛程。",
     },
     odds_data: {
