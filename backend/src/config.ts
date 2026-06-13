@@ -23,11 +23,8 @@ export type ConfigStatus = {
 const hasValue = (value: string | undefined) => Boolean(value?.trim());
 
 export function getConfigStatus(): ConfigStatus {
-  const sportsConfigured =
-    hasValue(process.env.SPORTS_API_BASE_URL) &&
-    hasValue(process.env.SPORTS_API_KEY);
-  const oddsConfigured =
-    hasValue(process.env.ODDS_API_BASE_URL) && hasValue(process.env.ODDS_API_KEY);
+  const sportsConfigured = hasValue(process.env.SPORTS_API_KEY);
+  const oddsConfigured = hasValue(process.env.ODDS_API_KEY);
 
   return {
     deepseek: {
@@ -39,15 +36,15 @@ export function getConfigStatus(): ConfigStatus {
       configured: sportsConfigured,
       provider: process.env.SPORTS_DATA_PROVIDER || "API_FOOTBALL",
       message: sportsConfigured
-        ? "真实赛事数据源已配置。"
-        : "真实赛事数据源未配置，无法加载世界杯赛程。",
+        ? "API-Football 真实赛事数据源已配置。"
+        : "API-Football 免费密钥待配置，暂时无法加载真实世界杯赛程。",
     },
     odds_data: {
       configured: oddsConfigured,
       provider: process.env.ODDS_DATA_PROVIDER || "THE_ODDS_API",
       message: oddsConfigured
-        ? "真实赔率数据源已配置。"
-        : "真实赔率数据源未配置，无法生成 Agent 策略。",
+        ? "The Odds API 真实赔率数据源已配置。"
+        : "The Odds API 免费密钥待配置，暂时无法加载真实世界杯赔率。",
     },
     database: {
       configured: hasValue(process.env.DATABASE_URL),
@@ -68,4 +65,3 @@ export function getAllowedOrigins(): string[] {
 
   return [...new Set([...configured, "http://localhost:8081", "http://localhost:19006"])];
 }
-

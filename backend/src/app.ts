@@ -3,6 +3,8 @@ import express from "express";
 import { getAllowedOrigins, getConfigStatus } from "./config.js";
 import { APP_SCHEMA, query } from "./db.js";
 import { generateLearningGuide, verifyDeepSeekConnection } from "./services/deepseekService.js";
+import { getWorldCupMatches } from "./services/sportsDataService.js";
+import { getWorldCupOdds } from "./services/oddsDataService.js";
 
 const app = express();
 app.disable("x-powered-by");
@@ -64,6 +66,22 @@ app.get("/health", async (_request, response) => {
 
 app.get("/api/system/config-status", (_request, response) => {
   response.json(getConfigStatus());
+});
+
+app.get("/api/matches", async (_request, response) => {
+  try {
+    response.json({ matches: await getWorldCupMatches() });
+  } catch (error) {
+    response.status(503).json({ error: error instanceof Error ? error.message : "真实赛事服务暂不可用" });
+  }
+});
+
+app.get("/api/odds", async (_request, response) => {
+  try {
+    response.json({ odds: await getWorldCupOdds() });
+  } catch (error) {
+    response.status(503).json({ error: error instanceof Error ? error.message : "真实赔率服务暂不可用" });
+  }
 });
 
 app.get("/api/demo/cases", async (_request, response, next) => {

@@ -12,7 +12,7 @@ import {
 
 const API_BASE = (process.env.EXPO_PUBLIC_API_BASE_URL || "http://localhost:3000").replace(/\/$/, "");
 
-type Page = "首页" | "学习助手" | "系统状态" | "使用说明";
+type Page = "首页" | "真实赛程" | "学习助手" | "系统状态" | "使用说明";
 
 type ConfigStatus = {
   deepseek: { configured: boolean };
@@ -33,6 +33,26 @@ type LearningResult = {
   practical_exercise: string;
   risk_warning: string;
   fallback: false;
+};
+
+type Match = {
+  external_match_id: string;
+  home_team: string;
+  away_team: string;
+  stage: string;
+  kickoff_time: string;
+  status: "scheduled" | "live" | "finished";
+  home_score: number | null;
+  away_score: number | null;
+};
+
+type Odds = {
+  external_event_id: string;
+  home_team: string;
+  away_team: string;
+  kickoff_time: string;
+  bookmaker: string;
+  selections: Array<{ selection: "home" | "draw" | "away"; odds: number }>;
 };
 
 const topics = ["赔率是什么意思", "如何理解数学期望", "如何控制虚拟仓位", "如何做好赛后复盘"];
@@ -79,6 +99,11 @@ export default function App() {
   const [learning, setLearning] = useState<LearningResult | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [error, setError] = useState("");
+  const [matches, setMatches] = useState<Match[]>([]);
+  const [odds, setOdds] = useState<Odds[]>([]);
+  const [liveDataLoading, setLiveDataLoading] = useState(false);
+  const [matchesMessage, setMatchesMessage] = useState("");
+  const [oddsMessage, setOddsMessage] = useState("");
 
   const loadStatus = useCallback(async () => {
     setLoading(true);
@@ -122,6 +147,35 @@ export default function App() {
     }
   };
 
+  const loadLiveData = async () => {
+    setLiveDataLoading(true);
+    setMatchesMessage("");
+    setOddsMessage("");
+    try {
+      const [matchesResponse, oddsResponse] = await Promise.all([
+        fetch(`${API_BASE}/api/matches`),
+        fetch(`${API_BASE}/api/odds`),
+      ]);
+      const matchesPayload = await matchesResponse.json();
+      const oddsPayload = await oddsResponse.json();
+      if (matchesResponse.ok) setMatches(matchesPayload.matches || []);
+      else setMatchesMessage(matchesPayload.error || "真实赛程暂不可用");
+      if (oddsResponse.ok) setOdds(oddsPayload.odds || []);
+      else setOddsMessage(oddsPayload.error || "真实赔率暂不可用");
+    } catch {
+      setMatchesMessage("真实数据服务暂时无法连接");
+      setOddsMessage("真实数据服务暂时无法连接");
+    } finally {
+      setLiveDataLoading(false);
+    }
+  };
+
+  const openPage = (item: Page) => {
+    setPage(item);
+    setError("");
+    if (item === "真实赛程") void loadLiveData();
+  };
+
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.container}>
@@ -134,13 +188,10 @@ export default function App() {
         </View>
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.nav}>
-          {(["首页", "学习助手", "系统状态", "使用说明"] as Page[]).map((item) => (
+          {(["首页", "真实赛程", "学习助手", "系统状态", "使用说明"] as Page[]).map((item) => (
             <Pressable
               key={item}
-              onPress={() => {
-                setPage(item);
-                setError("");
-              }}
+              onPress={() => openPage(item)}
               style={[styles.navItem, page === item && styles.navItemActive]}
             >
               <Text style={[styles.navText, page === item && styles.navTextActive]}>{item}</Text>
@@ -165,13 +216,18 @@ export default function App() {
 
             <SectionTitle caption="当前真正可用的能力">功能入口</SectionTitle>
             <View style={styles.grid}>
-              <Pressable style={styles.featureCard} onPress={() => setPage("学习助手")}>
+              <Pressable style={styles.featureCard} onPress={() => openPage("真实赛程")}>
                 <Text style={styles.featureNumber}>01</Text>
+                <Text style={styles.featureTitle}>真实世界杯赛程</Text>
+                <Text style={styles.muted}>从 API-Football 加载真实赛程，并从 The Odds API 加载真实胜平负赔率。</Text>
+              </Pressable>
+              <Pressable style={styles.featureCard} onPress={() => setPage("学习助手")}>
+                <Text style={styles.featureNumber}>02</Text>
                 <Text style={styles.featureTitle}>人工智能学习助手</Text>
                 <Text style={styles.muted}>输入一个概念，获得中文解释、关键要点与练习任务。</Text>
               </Pressable>
               <Pressable style={styles.featureCard} onPress={() => setPage("系统状态")}>
-                <Text style={styles.featureNumber}>02</Text>
+                <Text style={styles.featureNumber}>03</Text>
                 <Text style={styles.featureTitle}>真实数据源状态</Text>
                 <Text style={styles.muted}>清楚区分已配置能力与待配置能力，绝不展示假赛程或假赔率。</Text>
               </Pressable>
@@ -183,6 +239,61 @@ export default function App() {
                 本产品仅用于虚拟策略学习，不提供真实投注、资金充值、资金提取或外部平台跳转。
               </Text>
             </View>
+          </>
+        ) : null}
+
+        {page === "真实赛程" ? (
+          <>
+            <SectionTitle caption="只展示供应商返回的真实数据">真实世界杯赛程与赔率</SectionTitle>
+            <Pressable style={styles.primaryButton} onPress={loadLiveData} disabled={liveDataLoading}>
+              <Text style={styles.primaryButtonText}>
+                {liveDataLoading ? "正在读取真实数据…" : "刷新真实数据"}
+              </Text>
+            </Pressable>
+            {liveDataLoading ? <ActivityIndicator color="#0d685a" size="large" /> : null}
+            {matchesMessage ? <Text style={styles.dataMessage}>{matchesMessage}</Text> : null}
+            {oddsMessage ? <Text style={styles.dataMessage}>{oddsMessage}</Text> : null}
+            {matches.map((match) => {
+              const matchOdds = odds.find(
+                (item) => item.home_team === match.home_team && item.away_team === match.away_team,
+              );
+              return (
+                <View key={match.external_match_id} style={styles.matchCard}>
+                  <View style={styles.matchMeta}>
+                    <Text style={styles.matchStage}>{match.stage}</Text>
+                    <Text style={styles.muted}>
+                      {new Date(match.kickoff_time).toLocaleString("zh-CN", {
+                        month: "numeric",
+                        day: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </Text>
+                  </View>
+                  <Text style={styles.matchTeams}>{match.home_team}  对阵  {match.away_team}</Text>
+                  {match.status === "finished" ? (
+                    <Text style={styles.matchScore}>{match.home_score} : {match.away_score}</Text>
+                  ) : null}
+                  {matchOdds ? (
+                    <View style={styles.oddsRow}>
+                      {matchOdds.selections.map((item) => (
+                        <View key={item.selection} style={styles.oddsCell}>
+                          <Text style={styles.oddsLabel}>
+                            {item.selection === "home" ? "主胜" : item.selection === "draw" ? "平局" : "客胜"}
+                          </Text>
+                          <Text style={styles.oddsValue}>{item.odds.toFixed(2)}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  ) : (
+                    <Text style={styles.muted}>当前赔率供应商尚未提供该场比赛的胜平负赔率。</Text>
+                  )}
+                </View>
+              );
+            })}
+            {!liveDataLoading && matches.length === 0 && !matchesMessage ? (
+              <Text style={styles.dataMessage}>真实赛事供应商当前尚未返回比赛数据。</Text>
+            ) : null}
           </>
         ) : null}
 
@@ -341,6 +452,16 @@ const styles = StyleSheet.create({
   learningPoint: { color: "#ffffff", fontSize: 13, lineHeight: 21 },
   exercise: { color: "#173e37", backgroundColor: "#d9eee8", borderRadius: 12, padding: 13, lineHeight: 20 },
   warning: { color: "#573f08", backgroundColor: "#fff0bd", borderRadius: 12, padding: 13, lineHeight: 20, fontWeight: "700" },
+  dataMessage: { color: "#815b0c", backgroundColor: "#f7e8c8", borderRadius: 14, padding: 14, lineHeight: 20 },
+  matchCard: { backgroundColor: "#fffdf8", borderWidth: 1, borderColor: "#dedbd1", borderRadius: 18, padding: 18, gap: 12 },
+  matchMeta: { flexDirection: "row", justifyContent: "space-between", gap: 12 },
+  matchStage: { color: "#0d7565", fontWeight: "800", fontSize: 12 },
+  matchTeams: { color: "#173e37", fontSize: 18, fontWeight: "900", lineHeight: 25 },
+  matchScore: { color: "#0d685a", fontSize: 24, fontWeight: "900" },
+  oddsRow: { flexDirection: "row", gap: 8 },
+  oddsCell: { flex: 1, backgroundColor: "#e7f2ef", borderRadius: 12, padding: 10, alignItems: "center", gap: 3 },
+  oddsLabel: { color: "#56706a", fontSize: 11, fontWeight: "700" },
+  oddsValue: { color: "#0d685a", fontSize: 16, fontWeight: "900" },
   statusRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, borderBottomWidth: 1, borderBottomColor: "#ebe8df", paddingBottom: 15 },
   statusCopy: { flex: 1, gap: 4 },
   statusTitle: { color: "#173e37", fontSize: 15, fontWeight: "800" },

@@ -14,12 +14,14 @@
 - 中文人工智能学习助手
 - 真实调用 DeepSeek 并返回结构化中文学习内容
 - 赔率、数学期望、虚拟仓位和赛后复盘概念学习
-- 真实数据源配置状态检查
+- API-Football 真实世界杯赛程与赛果接入层
+- The Odds API 真实胜平负赔率接入层
+- 中文真实赛程与赔率页面
 - 独立 Supabase Schema 与最小权限应用角色
 - 独立 Vercel 前端与后端项目
 - 明确拒绝使用虚构赛程、赛果或赔率
 
-API-Football 与 The Odds API 将在后续阶段接入。接入前，相关功能会明确显示“待配置”。
+真实 Provider 已完成，领取供应商免费密钥并配置后即可显示数据。密钥未配置或供应商尚未提供世界杯数据时，页面会明确说明原因。
 
 ## 本地运行
 
@@ -42,16 +44,33 @@ npm run dev:frontend
 - `POST /api/ai/learn`：生成中文学习讲解
 - `POST /api/ai/verify`：验证真实人工智能调用
 - `GET /api/system/config-status`：读取真实数据源配置状态
+- `GET /api/matches`：从 API-Football 读取真实世界杯赛程与赛果
+- `GET /api/odds`：从 The Odds API 读取真实世界杯胜平负赔率
 - `GET /health`：读取后端、数据库和人工智能健康状态
 
 ## 真实数据原则
 
-当前版本只展示数据源是否真实配置：
+当前版本已实现真实供应商调用：
 
-- `API_FOOTBALL`：真实赛程与赛果服务，当前待配置
-- `THE_ODDS_API`：真实赔率服务，当前待配置
+- `API_FOOTBALL`：通过 `https://v3.football.api-sports.io/fixtures` 获取真实赛程与赛果
+- `THE_ODDS_API`：通过 `soccer_fifa_world_cup` 获取真实世界杯胜平负赔率
 
 没有真实密钥时，界面会明确提示数据源待配置，不会生成假赛程、假赛果、假赔率或假策略。
+
+所需后端环境变量：
+
+```text
+SPORTS_API_KEY=
+SPORTS_API_BASE_URL=https://v3.football.api-sports.io
+SPORTS_LEAGUE_ID=1
+SPORTS_SEASON=2026
+ODDS_API_KEY=
+ODDS_API_BASE_URL=https://api.the-odds-api.com
+ODDS_SPORT_KEY=soccer_fifa_world_cup
+ODDS_REGION=eu
+ODDS_MARKET=h2h
+ODDS_FORMAT=decimal
+```
 
 ## 数据库隔离
 
@@ -75,8 +94,7 @@ npm run dev:frontend
 
 ## 后续计划
 
-1. 接入真实 API-Football 世界杯赛程与赛果。
-2. 接入真实 The Odds API 胜平负赔率。
-3. 开放虚拟练习币钱包与流水。
-4. 开放基于真实比赛数据的多 Agent 虚拟策略实验。
-5. 开放真实赛果结算与中文赛后复盘。
+1. 配置供应商免费密钥并完成真实数据线上验收。
+2. 开放虚拟练习币钱包与流水。
+3. 开放基于真实比赛数据的多 Agent 虚拟策略实验。
+4. 开放真实赛果结算与中文赛后复盘。
