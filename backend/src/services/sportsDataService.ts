@@ -75,5 +75,19 @@ export async function getTeamFlagMap(): Promise<Map<string, string>> {
     `select team_name, country_code as code, flag_url
      from ${APP_SCHEMA}.team_flags`,
   );
-  return new Map(result.rows.map((item) => [item.team_name.toLowerCase(), item.flag_url]));
+  const flags = new Map(result.rows.map((item) => [item.team_name.toLowerCase(), item.flag_url]));
+  const aliases: Record<string, string> = {
+    "bosnia & herzegovina": "https://media.api-sports.io/flags/ba.svg",
+    "cape verde": "https://media.api-sports.io/flags/cv.svg",
+    "curaçao": "https://media.api-sports.io/flags/cw.svg",
+    "czech republic": "https://media.api-sports.io/flags/cz.svg",
+    "dr congo": "https://media.api-sports.io/flags/cd.svg",
+    "ivory coast": "https://media.api-sports.io/flags/ci.svg",
+    "new zealand": "https://media.api-sports.io/flags/nz.svg",
+    "saudi arabia": "https://media.api-sports.io/flags/sa.svg",
+    "south africa": "https://media.api-sports.io/flags/za.svg",
+    "south korea": "https://media.api-sports.io/flags/kr.svg",
+  };
+  for (const [name, flagUrl] of Object.entries(aliases)) flags.set(name, flagUrl);
+  return flags;
 }
