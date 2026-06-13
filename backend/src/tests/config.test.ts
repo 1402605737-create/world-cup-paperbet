@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { getConfigStatus } from "../config.js";
 import { fetchWorldCupMatches } from "../providers/apiFootballProvider.js";
-import { fetchWorldCupOdds } from "../providers/theOddsApiProvider.js";
+import { fetchWorldCupOdds, fetchWorldCupScores } from "../providers/theOddsApiProvider.js";
 
 function restoreEnv(name: string, value: string | undefined) {
   if (value === undefined) delete process.env[name];
@@ -33,6 +33,7 @@ test("缺少密钥时真实供应商必须明确失败且不得返回假数据",
 
   await assert.rejects(fetchWorldCupMatches(), /尚未配置/);
   await assert.rejects(fetchWorldCupOdds(), /尚未配置/);
+  await assert.rejects(fetchWorldCupScores(), /尚未配置/);
 
   restoreEnv("SPORTS_API_KEY", previousSportsKey);
   restoreEnv("ODDS_API_KEY", previousOddsKey);

@@ -15,7 +15,25 @@ const learningSchema = z.object({
   summary: z.string().min(1).max(800),
   key_points: z.array(z.string().min(1).max(400)).min(3).max(6),
   practical_exercise: z.string().min(1).max(600),
+  reference_answer: z.string().min(1).max(800),
   risk_warning: z.string().min(1).max(400),
+});
+
+const agentOpinionSchema = z.object({
+  agent_name: z.string().min(1).max(30),
+  personality: z.string().min(1).max(100),
+  task: z.string().min(1).max(200),
+  conclusion: z.string().min(1).max(600),
+  evidence: z.array(z.string().min(1).max(300)).min(2).max(4),
+  confidence: z.number().min(0).max(100),
+});
+
+const panelDecisionSchema = z.object({
+  decision: z.enum(["支持该选择", "建议观望"]),
+  summary: z.string().min(1).max(700),
+  disagreements: z.string().min(1).max(500),
+  virtual_stake_limit: z.number().int().min(0).max(500),
+  review_question: z.string().min(1).max(300),
 });
 
 export type DeepSeekVerification = z.infer<typeof verificationSchema> & {
@@ -28,6 +46,12 @@ export type LearningGuide = z.infer<typeof learningSchema> & {
   fallback: false;
   model: string;
   request_id: string | null;
+};
+
+export type StrategyPanel = {
+  agents: Array<z.infer<typeof agentOpinionSchema>>;
+  coordinator: z.infer<typeof panelDecisionSchema>;
+  fallback: false;
 };
 
 function assertSafeContent(content: string) {
@@ -117,8 +141,55 @@ export async function generateLearningGuide(topic: string): Promise<LearningGuid
   const safeTopic = JSON.stringify({ topic });
   const guide = await callDeepSeekJson(
     "你是世界杯纸上竞猜的中文学习助手。你只做虚拟策略、赔率数学、概率、风险控制和赛后复盘教育。不得提供真实资金操作建议，不得承诺结果。只输出合法 JSON，所有自然语言内容必须使用简体中文。",
-    `用户学习主题以数据形式提供：${safeTopic}。请紧扣该主题返回：{"topic":"原始中文主题","summary":"通俗中文讲解","key_points":["至少三个中文要点"],"practical_exercise":"一个不依赖真实比赛或真实资金的中文练习任务","risk_warning":"仅用于虚拟模拟学习的中文提醒"}。`,
+    `用户学习主题以数据形式提供：${safeTopic}。请紧扣该主题返回：{"topic":"原始中文主题","summary":"通俗中文讲解","key_points":["至少三个中文要点"],"practical_exercise":"一个不依赖真实资金的中文练习任务","reference_answer":"给出练习任务的参考解题过程与答案","risk_warning":"仅用于虚拟模拟学习的中文提醒"}。`,
     learningSchema,
   );
   return { ...guide, topic };
+}
+
+type StrategyPanelInput = {
+  home_team: string;
+  away_team: string;
+  selection: "home" | "draw" | "away";
+  odds: number;
+};
+
+const rolePrompts = [
+  {
+    agent_name: "数据分析师·数字派",
+    personality: "冷静、重计算、只相信可验证数字",
+    task: "计算赔率隐含概率，并判断该选择需要多高的主观胜率才能具备正期望。",
+  },
+  {
+    agent_name: "反方审计员·唱反调",
+    personality: "怀疑、挑剔、专门寻找判断漏洞",
+    task: "主动反驳该选择，指出信息缺口、赔率陷阱和不能从现有数据推出的结论。",
+  },
+  {
+    agent_name: "风险管理员·守门员",
+    personality: "保守、纪律优先、关注最坏结果",
+    task: "评估虚拟练习币仓位风险，并给出不超过 500 练习币的上限建议。",
+  },
+] as const;
+
+export async function generateStrategyPanel(input: StrategyPanelInput): Promise<StrategyPanel> {
+  const inputJson = JSON.stringify(input);
+  const agents = await Promise.all(
+    rolePrompts.map((role) =>
+      callDeepSeekJson(
+        `你是世界杯纸上竞猜中的${role.agent_name}。人格：${role.personality}。任务：${role.task}
+只讨论虚拟练习币、概率学习与风险控制，不提供真实资金建议，不承诺结果。只输出合法 JSON，所有自然语言必须为简体中文。`,
+        `待分析的真实赔率快照：${inputJson}。请返回：{"agent_name":"${role.agent_name}","personality":"${role.personality}","task":"${role.task}","conclusion":"你的独立结论","evidence":["至少两条可核验依据"],"confidence":0到100的整数}。`,
+        agentOpinionSchema,
+      ),
+    ),
+  );
+
+  const coordinator = await callDeepSeekJson(
+    "你是世界杯纸上竞猜的主教练·裁决官。你不迎合任何一方，只汇总分歧、控制风险，并明确允许观望。只讨论虚拟练习币，不提供真实资金建议，不承诺结果。只输出合法 JSON，所有自然语言必须为简体中文。",
+    `赔率快照：${inputJson}。三个独立角色意见：${JSON.stringify(agents)}。请返回：{"decision":"支持该选择或建议观望","summary":"综合裁决","disagreements":"角色之间最重要的分歧","virtual_stake_limit":0到500的整数，建议观望时必须为0,"review_question":"赛后复盘问题"}。`,
+    panelDecisionSchema,
+  );
+
+  return { agents, coordinator, fallback: false };
 }

@@ -2,9 +2,13 @@ import cors from "cors";
 import express from "express";
 import { getAllowedOrigins, getConfigStatus } from "./config.js";
 import { APP_SCHEMA, query } from "./db.js";
-import { generateLearningGuide, verifyDeepSeekConnection } from "./services/deepseekService.js";
+import {
+  generateLearningGuide,
+  generateStrategyPanel,
+  verifyDeepSeekConnection,
+} from "./services/deepseekService.js";
 import { getWorldCupMatches, syncWorldCupResults } from "./services/sportsDataService.js";
-import { getWorldCupOdds } from "./services/oddsDataService.js";
+import { getWorldCupOdds, getWorldCupScores } from "./services/oddsDataService.js";
 
 const app = express();
 app.disable("x-powered-by");
@@ -97,6 +101,14 @@ app.get("/api/odds", async (_request, response) => {
   }
 });
 
+app.get("/api/current-scores", async (_request, response) => {
+  try {
+    response.json({ scores: await getWorldCupScores() });
+  } catch (error) {
+    response.status(503).json({ error: error instanceof Error ? error.message : "本届比分服务暂不可用" });
+  }
+});
+
 app.get("/api/demo/cases", async (_request, response, next) => {
   try {
     const result = await query(
@@ -146,6 +158,39 @@ app.post("/api/ai/learn", async (request, response, next) => {
       return;
     }
     response.json(await generateLearningGuide(input.topic.trim()));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/ai/strategy-panel", async (request, response, next) => {
+  try {
+    const input = request.body as {
+      home_team?: unknown;
+      away_team?: unknown;
+      selection?: unknown;
+      odds?: unknown;
+    };
+    if (
+      typeof input.home_team !== "string" ||
+      typeof input.away_team !== "string" ||
+      !["home", "draw", "away"].includes(String(input.selection)) ||
+      typeof input.odds !== "number" ||
+      !Number.isFinite(input.odds) ||
+      input.odds <= 1 ||
+      input.odds > 100
+    ) {
+      response.status(400).json({ error: "请选择有效的真实赔率后再启动多角色分析。" });
+      return;
+    }
+    response.json(
+      await generateStrategyPanel({
+        home_team: input.home_team,
+        away_team: input.away_team,
+        selection: input.selection as "home" | "draw" | "away",
+        odds: input.odds,
+      }),
+    );
   } catch (error) {
     next(error);
   }
