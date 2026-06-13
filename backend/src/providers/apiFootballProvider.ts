@@ -48,7 +48,7 @@ const countryResponseSchema = z.object({
     z.object({
       name: z.string(),
       code: z.string().nullable(),
-      flag: z.string(),
+      flag: z.string().nullable(),
     }),
   ),
 });
@@ -75,11 +75,13 @@ export async function fetchCountryFlags(): Promise<CountryFlag[]> {
     signal: AbortSignal.timeout(20_000),
   });
   if (!response.ok) throw new Error(`国家旗帜服务返回错误状态：${response.status}`);
-  return countryResponseSchema.parse(await response.json()).response.map((country) => ({
-    name: country.name,
-    code: country.code,
-    flag_url: country.flag,
-  }));
+  return countryResponseSchema
+    .parse(await response.json())
+    .response.flatMap((country) =>
+      country.flag
+        ? [{ name: country.name, code: country.code, flag_url: country.flag }]
+        : [],
+    );
 }
 
 export async function fetchWorldCupMatches(flags: CountryFlag[] = []): Promise<StandardMatch[]> {
