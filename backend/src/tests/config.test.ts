@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { getConfigStatus } from "../config.js";
 
-test("unconfigured real data providers never claim to be available", () => {
+test("未配置的真实数据源不得显示为可用", () => {
   const previousSportsKey = process.env.SPORTS_API_KEY;
   const previousOddsKey = process.env.ODDS_API_KEY;
   delete process.env.SPORTS_API_KEY;
@@ -17,4 +17,3 @@ test("unconfigured real data providers never claim to be available", () => {
   process.env.SPORTS_API_KEY = previousSportsKey;
   process.env.ODDS_API_KEY = previousOddsKey;
 });
-

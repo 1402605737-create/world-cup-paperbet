@@ -1,15 +1,15 @@
--- Run once as a Supabase administrator in SQL Editor.
--- Replace __APP_PASSWORD__ only in a local ignored temporary copy.
--- This script intentionally does not inspect or modify any existing application object.
+-- 仅由 Supabase 管理员在 SQL Editor 中执行一次。
+-- 只在本机被 Git 忽略的临时副本中替换 __APP_PASSWORD__。
+-- 此脚本不会检查或修改任何已有应用对象。
 
 do $bootstrap$
 begin
   if exists (select 1 from pg_roles where rolname = 'world_cup_paperbet_app') then
-    raise exception 'Role world_cup_paperbet_app already exists; stop to avoid modifying an existing role';
+    raise exception '角色 world_cup_paperbet_app 已存在；为避免修改已有角色，操作已停止';
   end if;
 
   if exists (select 1 from information_schema.schemata where schema_name = 'world_cup_paperbet') then
-    raise exception 'Schema world_cup_paperbet already exists; stop to avoid modifying an existing schema';
+    raise exception 'Schema world_cup_paperbet 已存在；为避免修改已有 Schema，操作已停止';
   end if;
 
   create role world_cup_paperbet_app
@@ -53,19 +53,19 @@ create index ai_call_logs_created_at_idx
 insert into world_cup_paperbet.demo_cases (slug, title, status, agent_trace, evidence, result)
 values (
   'configuration-readiness',
-  'Data source configuration readiness',
+  '数据源配置就绪检查',
   'ready',
   '[
-    {"step": 1, "agent": "Config Inspector", "action": "Inspect server-side environment flags"},
-    {"step": 2, "agent": "Compliance Guard", "action": "Block unconfigured providers from returning invented data"},
-    {"step": 3, "agent": "DeepSeek Verifier", "action": "Run a real structured-output connectivity check"}
+    {"step": 1, "agent": "配置检查助手", "action": "检查后端环境变量配置状态"},
+    {"step": 2, "agent": "合规保护助手", "action": "阻止未配置数据源返回虚构数据"},
+    {"step": 3, "agent": "人工智能验证助手", "action": "验证结构化中文内容生成能力"}
   ]'::jsonb,
   '[
-    "Sports and odds providers expose explicit configured flags",
-    "The backend never returns mock match, result, or odds data",
-    "AI verification records fallback=false responses"
+    "赛事与赔率数据源均提供明确配置状态",
+    "后端不会返回虚构赛程、赛果或赔率",
+    "人工智能调用记录明确标记未使用替代结果"
   ]'::jsonb,
-  '{"outcome": "Configuration dashboard is ready for live-provider onboarding"}'::jsonb
+  '{"outcome": "中文学习助手与数据源状态功能已就绪"}'::jsonb
 );
 
 grant connect on database postgres to world_cup_paperbet_app;

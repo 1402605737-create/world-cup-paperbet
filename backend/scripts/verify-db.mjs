@@ -2,7 +2,7 @@ import pg from "pg";
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
-  throw new Error("DATABASE_URL is required");
+  throw new Error("必须配置数据库连接地址");
 }
 
 const pool = new pg.Pool({

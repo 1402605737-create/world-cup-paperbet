@@ -29,7 +29,7 @@ export async function query<T extends pg.QueryResultRow>(
   values: unknown[] = [],
 ): Promise<pg.QueryResult<T>> {
   if (!pool) {
-    throw new Error("DATABASE_URL is not configured");
+    throw new Error("数据库连接尚未配置");
   }
   return pool.query<T>(text, values);
 }
