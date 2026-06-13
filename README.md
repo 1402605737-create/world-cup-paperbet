@@ -1,8 +1,8 @@
 # World Cup PaperBet
 
 **GitHub:** https://github.com/1402605737-create/world-cup-paperbet
-**Live Demo:** pending
-**Backend Health:** pending
+**Live Demo:** https://world-cup-paperbet-web.vercel.app
+**Backend Health:** https://world-cup-paperbet-api.vercel.app/health
 
 World Cup PaperBet is a mobile-first, practice-only strategy laboratory. This first deployment milestone contains the Expo app skeleton, a secure DeepSeek backend connection, Supabase Postgres readiness, and a truthful data-source configuration dashboard. It never invents match, result, or odds data when real providers are not configured.
 
