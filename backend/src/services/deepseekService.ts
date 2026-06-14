@@ -29,10 +29,13 @@ const agentOpinionSchema = z.object({
 });
 
 const panelDecisionSchema = z.object({
-  decision: z.enum(["支持该选择", "建议观望"]),
+  decision: z.enum(["虚拟买入", "小仓试验", "建议观望"]),
   summary: z.string().min(1).max(700),
   disagreements: z.string().min(1).max(500),
   virtual_stake_limit: z.number().int().min(0).max(500),
+  recommended_virtual_stake: z.number().int().min(0).max(200),
+  action_reason: z.string().min(1).max(400),
+  entry_condition: z.string().min(1).max(400),
   review_question: z.string().min(1).max(300),
 });
 
@@ -186,10 +189,19 @@ export async function generateStrategyPanel(input: StrategyPanelInput): Promise<
   );
 
   const coordinator = await callDeepSeekJson(
-    "你是世界杯纸上竞猜的主教练·裁决官。你不迎合任何一方，只汇总分歧、控制风险，并明确允许观望。只讨论虚拟练习币，不提供真实资金建议，不承诺结果。只输出合法 JSON，所有自然语言必须为简体中文。",
-    `赔率快照：${inputJson}。三个独立角色意见：${JSON.stringify(agents)}。请返回：{"decision":"支持该选择或建议观望","summary":"综合裁决","disagreements":"角色之间最重要的分歧","virtual_stake_limit":0到500的整数，建议观望时必须为0,"review_question":"赛后复盘问题"}。`,
+    "你是世界杯纸上竞猜的主教练·裁决官。你不迎合任何一方，只汇总分歧、控制风险，并给出明确的虚拟模拟行动。只讨论虚拟练习币，不提供真实资金建议，不承诺结果。只输出合法 JSON，所有自然语言必须为简体中文。",
+    `赔率快照：${inputJson}。三个独立角色意见：${JSON.stringify(agents)}。请返回：{"decision":"虚拟买入、小仓试验或建议观望","summary":"综合裁决","disagreements":"角色之间最重要的分歧","virtual_stake_limit":0到500的整数,"recommended_virtual_stake":0到200的整数，建议观望时必须为0,"action_reason":"为什么采取该行动","entry_condition":"执行该虚拟行动前需要满足的条件，观望时说明重新评估条件","review_question":"赛后复盘问题"}。`,
     panelDecisionSchema,
   );
 
-  return { agents, coordinator, fallback: false };
+  const recommendedStake =
+    coordinator.decision === "建议观望"
+      ? 0
+      : Math.min(coordinator.recommended_virtual_stake, coordinator.virtual_stake_limit);
+
+  return {
+    agents,
+    coordinator: { ...coordinator, recommended_virtual_stake: recommendedStake },
+    fallback: false,
+  };
 }

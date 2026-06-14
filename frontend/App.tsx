@@ -78,6 +78,17 @@ type CurrentScore = {
   away_team_flag_url: string | null;
 };
 
+type ReplayMatch = {
+  external_match_id: string;
+  home_team: string;
+  away_team: string;
+  kickoff_time: string;
+  home_score: number;
+  away_score: number;
+  home_team_flag_url: string | null;
+  away_team_flag_url: string | null;
+};
+
 type SelectedBet = {
   eventId: string;
   homeTeam: string;
@@ -94,8 +105,12 @@ type PracticeSlip = SelectedBet & {
   stake: number;
   potentialReturn: number;
   reason: string;
-  status: "待结算";
+  status: "待结算" | "已命中" | "未命中" | "已归档";
   createdAt: string;
+  settledAt?: string;
+  payout?: number;
+  experienceEarned?: number;
+  mode?: "赛前模拟" | "赛后复盘";
 };
 
 type AgentOpinion = {
@@ -110,13 +125,33 @@ type AgentOpinion = {
 type StrategyPanel = {
   agents: AgentOpinion[];
   coordinator: {
-    decision: "支持该选择" | "建议观望";
+    decision: "虚拟买入" | "小仓试验" | "建议观望";
     summary: string;
     disagreements: string;
     virtual_stake_limit: number;
+    recommended_virtual_stake: number;
+    action_reason: string;
+    entry_condition: string;
     review_question: string;
   };
   fallback: false;
+};
+
+type PanelHistoryItem = {
+  id: string;
+  bet: SelectedBet;
+  panel: StrategyPanel;
+  createdAt: string;
+};
+
+type ExperienceProfile = {
+  experience: number;
+  discipline: number;
+  season: number;
+  totalGranted: number;
+  panelsCompleted: number;
+  slipsCreated: number;
+  slipsSettled: number;
 };
 
 const topics = ["赔率是什么意思", "如何理解数学期望", "如何控制虚拟仓位", "如何做好赛后复盘"];
@@ -155,7 +190,21 @@ const storageKeys = {
   balance: "纸上竞猜_练习币余额",
   slips: "纸上竞猜_模拟单",
   learning: "纸上竞猜_学习历史",
+  panels: "纸上竞猜_会审历史",
+  profile: "纸上竞猜_成长档案",
 };
+
+const initialProfile: ExperienceProfile = {
+  experience: 0,
+  discipline: 0,
+  season: 1,
+  totalGranted: INITIAL_BALANCE,
+  panelsCompleted: 0,
+  slipsCreated: 0,
+  slipsSettled: 0,
+};
+
+const quickReasons = ["赔率隐含概率值得练习", "跟随会审建议小仓试验", "刻意练习逆向判断", "记录直觉并等待赛后验证"];
 
 function zhTeam(name: string) {
   return teamNames[name] || name;
@@ -175,6 +224,19 @@ function zhDate(value: string) {
     minute: "2-digit",
     hour12: false,
   });
+}
+
+function normalizeTeamName(name: string) {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function sameMatch(slip: PracticeSlip, score: CurrentScore) {
+  if (slip.eventId === score.external_event_id) return true;
+  const teamsMatch =
+    normalizeTeamName(slip.homeTeam) === normalizeTeamName(score.home_team) &&
+    normalizeTeamName(slip.awayTeam) === normalizeTeamName(score.away_team);
+  const kickoffGap = Math.abs(new Date(slip.kickoffTime).getTime() - new Date(score.kickoff_time).getTime());
+  return teamsMatch && kickoffGap <= 24 * 60 * 60 * 1000;
 }
 
 function SectionTitle({ children, caption }: { children: string; caption?: string }) {
@@ -223,7 +285,7 @@ export default function App() {
   const [matchesMessage, setMatchesMessage] = useState("");
   const [oddsMessage, setOddsMessage] = useState("");
   const [selectedBet, setSelectedBet] = useState<SelectedBet | null>(null);
-  const [stake, setStake] = useState("100");
+  const [stake, setStake] = useState("25");
   const [reason, setReason] = useState("");
   const [balance, setBalance] = useState(INITIAL_BALANCE);
   const [slips, setSlips] = useState<PracticeSlip[]>([]);
@@ -233,9 +295,17 @@ export default function App() {
   const [aiLoading, setAiLoading] = useState(false);
   const [panel, setPanel] = useState<StrategyPanel | null>(null);
   const [panelLoading, setPanelLoading] = useState(false);
+  const [panelHistory, setPanelHistory] = useState<PanelHistoryItem[]>([]);
+  const [profile, setProfile] = useState<ExperienceProfile>(initialProfile);
+  const [grantAmount, setGrantAmount] = useState("1000");
+  const [replayMatch, setReplayMatch] = useState<ReplayMatch | null>(null);
+  const [replaySelection, setReplaySelection] = useState<Selection>("home");
+  const [replayStake, setReplayStake] = useState("10");
 
   const stakeNumber = Number(stake) || 0;
   const potentialReturn = selectedBet ? Math.round(stakeNumber * selectedBet.odds * 100) / 100 : 0;
+  const level = Math.floor(profile.experience / 100) + 1;
+  const levelProgress = profile.experience % 100;
 
   const loadStatus = useCallback(async () => {
     setLoading(true);
@@ -257,16 +327,77 @@ export default function App() {
   useEffect(() => {
     void loadStatus();
     void (async () => {
-      const [savedBalance, savedSlips, savedLearning] = await Promise.all([
+      const [savedBalance, savedSlips, savedLearning, savedPanels, savedProfile] = await Promise.all([
         AsyncStorage.getItem(storageKeys.balance),
         AsyncStorage.getItem(storageKeys.slips),
         AsyncStorage.getItem(storageKeys.learning),
+        AsyncStorage.getItem(storageKeys.panels),
+        AsyncStorage.getItem(storageKeys.profile),
       ]);
       if (savedBalance) setBalance(Number(savedBalance));
       if (savedSlips) setSlips(JSON.parse(savedSlips));
       if (savedLearning) setLearningHistory(JSON.parse(savedLearning));
+      if (savedPanels) setPanelHistory(JSON.parse(savedPanels));
+      if (savedProfile) setProfile({ ...initialProfile, ...JSON.parse(savedProfile) });
     })();
   }, [loadStatus]);
+
+  const settlePendingSlips = async (scores: CurrentScore[]) => {
+    let payoutTotal = 0;
+    let experienceTotal = 0;
+    let settledCount = 0;
+    const settledAt = new Date().toISOString();
+    const nextSlips = slips.map((slip) => {
+      if (slip.status !== "待结算" || slip.mode === "赛后复盘") return slip;
+      const score = scores.find((item) => sameMatch(slip, item));
+      if (!score?.completed || score.home_score === null || score.away_score === null) return slip;
+      const result: Selection = score.home_score > score.away_score ? "home" : score.home_score < score.away_score ? "away" : "draw";
+      const won = result === slip.selection;
+      const payout = won ? slip.potentialReturn : 0;
+      const experienceEarned = won ? 60 : 35;
+      payoutTotal += payout;
+      experienceTotal += experienceEarned;
+      settledCount += 1;
+      return { ...slip, status: won ? "已命中" as const : "未命中" as const, settledAt, payout, experienceEarned };
+    });
+    if (settledCount === 0) return;
+    const nextBalance = Math.round((balance + payoutTotal) * 100) / 100;
+    const nextProfile = {
+      ...profile,
+      experience: profile.experience + experienceTotal,
+      discipline: profile.discipline + settledCount * 5,
+      slipsSettled: profile.slipsSettled + settledCount,
+    };
+    setSlips(nextSlips);
+    setBalance(nextBalance);
+    setProfile(nextProfile);
+    setSuccess(`已按真实赛果结算 ${settledCount} 张模拟单，获得 ${experienceTotal} 点经验。`);
+    await Promise.all([
+      AsyncStorage.setItem(storageKeys.slips, JSON.stringify(nextSlips)),
+      AsyncStorage.setItem(storageKeys.balance, String(nextBalance)),
+      AsyncStorage.setItem(storageKeys.profile, JSON.stringify(nextProfile)),
+    ]);
+  };
+
+  const settleNow = async () => {
+    setLiveDataLoading(true);
+    setError("");
+    try {
+      const response = await fetch(`${API_BASE}/api/current-scores`);
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "真实比分暂不可用");
+      const scores = payload.scores || [];
+      setCurrentScores(scores);
+      const before = slips.filter((item) => item.status === "待结算" && item.mode !== "赛后复盘").length;
+      await settlePendingSlips(scores);
+      const matchable = slips.filter((slip) => slip.status === "待结算" && scores.some((score: CurrentScore) => score.completed && sameMatch(slip, score))).length;
+      if (matchable === 0) setSuccess(`已检查 ${before} 张待结算票，当前没有可匹配的已结束比赛。`);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "结算失败");
+    } finally {
+      setLiveDataLoading(false);
+    }
+  };
 
   const loadLiveData = async () => {
     setLiveDataLoading(true);
@@ -285,7 +416,11 @@ export default function App() {
       else setMatchesMessage(matchesPayload.error || "历史赛果暂不可用");
       if (oddsResponse.ok) setOdds(oddsPayload.odds || []);
       else setOddsMessage(oddsPayload.error || "本届真实赔率暂不可用");
-      if (scoresResponse.ok) setCurrentScores(scoresPayload.scores || []);
+      if (scoresResponse.ok) {
+        const scores = scoresPayload.scores || [];
+        setCurrentScores(scores);
+        await settlePendingSlips(scores);
+      }
     } catch {
       setMatchesMessage("真实数据服务暂时无法连接");
       setOddsMessage("真实数据服务暂时无法连接");
@@ -299,6 +434,7 @@ export default function App() {
     setError("");
     setSuccess("");
     if (item === "真实数据" && odds.length === 0) void loadLiveData();
+    if (item === "虚拟模拟" && slips.some((slip) => slip.status === "待结算")) void settleNow();
   };
 
   const chooseBet = (event: Odds, selection: Odds["selections"][number]) => {
@@ -314,7 +450,7 @@ export default function App() {
     });
     setPanel(null);
     setReason("");
-    setStake("100");
+    setStake("25");
     setPage("虚拟模拟");
     setSuccess("");
   };
@@ -323,36 +459,109 @@ export default function App() {
     if (!selectedBet) return setError("请先从真实赔率中选择一个结果。");
     if (stakeNumber <= 0 || stakeNumber > MAX_STAKE) return setError(`单次模拟投入必须为 1 至 ${MAX_STAKE} 练习币。`);
     if (stakeNumber > balance) return setError("练习币余额不足。");
-    if (!reason.trim()) return setError("请先写下选择理由，便于赛后复盘。");
+    const recordedReason = reason.trim() || "快速体验：暂未填写理由，赛后需要补充复盘。";
+    const experienceEarned = reason.trim() ? 15 : 8;
     const slip: PracticeSlip = {
       ...selectedBet,
       id: `${selectedBet.eventId}-${Date.now()}`,
       stake: stakeNumber,
       potentialReturn,
-      reason: reason.trim(),
+      reason: recordedReason,
       status: "待结算",
       createdAt: new Date().toISOString(),
+      experienceEarned,
     };
     const nextSlips = [slip, ...slips].slice(0, 50);
     const nextBalance = balance - stakeNumber;
+    const nextProfile = {
+      ...profile,
+      experience: profile.experience + experienceEarned,
+      discipline: profile.discipline + (reason.trim() ? 2 : 0),
+      slipsCreated: profile.slipsCreated + 1,
+    };
     setSlips(nextSlips);
     setBalance(nextBalance);
+    setProfile(nextProfile);
     setError("");
-    setSuccess("虚拟模拟单已建立，并已保存到当前设备。");
+    setSuccess(`虚拟模拟单已建立，获得 ${experienceEarned} 点经验。`);
     await Promise.all([
       AsyncStorage.setItem(storageKeys.slips, JSON.stringify(nextSlips)),
       AsyncStorage.setItem(storageKeys.balance, String(nextBalance)),
+      AsyncStorage.setItem(storageKeys.profile, JSON.stringify(nextProfile)),
     ]);
   };
 
-  const resetPractice = async () => {
-    setBalance(INITIAL_BALANCE);
-    setSlips([]);
-    setSelectedBet(null);
-    setSuccess("练习账户已重置。");
+  const grantPracticeCoins = async () => {
+    const amount = Number(grantAmount);
+    if (!Number.isFinite(amount) || amount <= 0 || amount > 1_000_000) {
+      setError("单次补充额度必须为 1 至 1,000,000 练习币。");
+      return;
+    }
+    const nextBalance = Math.round((balance + amount) * 100) / 100;
+    const nextProfile = { ...profile, totalGranted: profile.totalGranted + amount };
+    setBalance(nextBalance);
+    setProfile(nextProfile);
+    setError("");
+    setSuccess(`已补充 ${amount.toLocaleString("zh-CN")} 练习币。该额度不计入盈亏。`);
     await Promise.all([
-      AsyncStorage.setItem(storageKeys.balance, String(INITIAL_BALANCE)),
-      AsyncStorage.setItem(storageKeys.slips, "[]"),
+      AsyncStorage.setItem(storageKeys.balance, String(nextBalance)),
+      AsyncStorage.setItem(storageKeys.profile, JSON.stringify(nextProfile)),
+    ]);
+  };
+
+  const startReplay = (match: ReplayMatch) => {
+    setReplayMatch(match);
+    setReplaySelection("home");
+    setReplayStake("10");
+    setPage("虚拟模拟");
+    setSuccess("已进入赛后补购模拟。该练习不会计入正式盈亏。");
+  };
+
+  const submitReplay = async () => {
+    if (!replayMatch || replayMatch.home_score === null || replayMatch.away_score === null) return;
+    const amount = Number(replayStake);
+    if (!Number.isFinite(amount) || amount <= 0 || amount > MAX_STAKE) {
+      setError(`赛后补购投入必须为 1 至 ${MAX_STAKE} 练习币。`);
+      return;
+    }
+    if (amount > balance) return setError("练习币余额不足，可以先任意补充额度。");
+    const result: Selection = replayMatch.home_score > replayMatch.away_score ? "home" : replayMatch.home_score < replayMatch.away_score ? "away" : "draw";
+    const won = replaySelection === result;
+    const replayOdds: Record<Selection, number> = { home: 2.35, draw: 3.2, away: 2.75 };
+    const teachingOdds = replayOdds[replaySelection];
+    const payout = won ? amount * teachingOdds : 0;
+    const experienceEarned = 10;
+    const slip: PracticeSlip = {
+      id: `replay-${replayMatch.external_match_id}-${Date.now()}`,
+      eventId: replayMatch.external_match_id,
+      homeTeam: replayMatch.home_team,
+      awayTeam: replayMatch.away_team,
+      homeFlag: replayMatch.home_team_flag_url,
+      awayFlag: replayMatch.away_team_flag_url,
+      kickoffTime: replayMatch.kickoff_time,
+      selection: replaySelection,
+      odds: teachingOdds,
+      stake: amount,
+      potentialReturn: amount * teachingOdds,
+      reason: "赛后补购复盘：结果已知，仅练习选择与返还计算。",
+      status: won ? "已命中" : "未命中",
+      createdAt: new Date().toISOString(),
+      settledAt: new Date().toISOString(),
+      payout,
+      experienceEarned,
+      mode: "赛后复盘",
+    };
+    const nextSlips = [slip, ...slips].slice(0, 100);
+    const nextBalance = balance - amount + payout;
+    const nextProfile = { ...profile, experience: profile.experience + experienceEarned };
+    setSlips(nextSlips);
+    setBalance(nextBalance);
+    setProfile(nextProfile);
+    setSuccess(`赛后补购复盘完成，获得 ${experienceEarned} 点经验。该结果不计入正式盈亏。`);
+    await Promise.all([
+      AsyncStorage.setItem(storageKeys.slips, JSON.stringify(nextSlips)),
+      AsyncStorage.setItem(storageKeys.balance, String(nextBalance)),
+      AsyncStorage.setItem(storageKeys.profile, JSON.stringify(nextProfile)),
     ]);
   };
 
@@ -399,6 +608,30 @@ export default function App() {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "多角色分析失败");
       setPanel(payload);
+      const historyItem: PanelHistoryItem = {
+        id: `${selectedBet.eventId}-${selectedBet.selection}-${Date.now()}`,
+        bet: selectedBet,
+        panel: payload,
+        createdAt: new Date().toISOString(),
+      };
+      const nextHistory = [historyItem, ...panelHistory].slice(0, 30);
+      const nextProfile = {
+        ...profile,
+        experience: profile.experience + 20,
+        discipline: profile.discipline + 3,
+        panelsCompleted: profile.panelsCompleted + 1,
+      };
+      setPanelHistory(nextHistory);
+      setProfile(nextProfile);
+      if (payload.coordinator.recommended_virtual_stake > 0) {
+        setStake(String(payload.coordinator.recommended_virtual_stake));
+        setReason(payload.coordinator.action_reason);
+      }
+      setSuccess("会审已保存，获得 20 点经验和 3 点纪律分。");
+      await Promise.all([
+        AsyncStorage.setItem(storageKeys.panels, JSON.stringify(nextHistory)),
+        AsyncStorage.setItem(storageKeys.profile, JSON.stringify(nextProfile)),
+      ]);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "多角色分析失败");
     } finally {
@@ -406,7 +639,22 @@ export default function App() {
     }
   };
 
-  const pendingExposure = useMemo(() => slips.reduce((sum, item) => sum + item.stake, 0), [slips]);
+  const pendingExposure = useMemo(
+    () => slips.filter((item) => item.mode !== "赛后复盘" && item.status === "待结算").reduce((sum, item) => sum + item.stake, 0),
+    [slips],
+  );
+  const realizedProfitLoss = useMemo(
+    () => slips
+      .filter((item) => item.mode !== "赛后复盘" && (item.status === "已命中" || item.status === "未命中"))
+      .reduce((sum, item) => sum + (item.payout || 0) - item.stake, 0),
+    [slips],
+  );
+  const replayProfitLoss = useMemo(
+    () => slips
+      .filter((item) => item.mode === "赛后复盘")
+      .reduce((sum, item) => sum + (item.payout || 0) - item.stake, 0),
+    [slips],
+  );
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -431,9 +679,11 @@ export default function App() {
         {page === "首页" ? (
           <>
             <View style={styles.hero}>
-              <Text style={styles.heroLabel}>今日账户</Text>
+              <Text style={styles.heroLabel}>第 {profile.season} 练习赛季 · 等级 {level}</Text>
               <Text style={styles.heroBalance}>{balance.toLocaleString("zh-CN")} 练习币</Text>
-              <Text style={styles.heroText}>已建立 {slips.length} 张模拟单，待结算虚拟投入 {pendingExposure.toLocaleString("zh-CN")} 练习币。</Text>
+              <Text style={styles.heroText}>经验 {profile.experience} · 纪律分 {profile.discipline} · 已建立 {slips.length} 张模拟单 · 待结算投入 {pendingExposure.toLocaleString("zh-CN")} 练习币。</Text>
+              <View style={styles.progressTrack}><View style={[styles.progressFill, { width: `${levelProgress}%` }]} /></View>
+              <Text style={styles.heroText}>距离下一等级还需 {100 - levelProgress} 点经验。会审、建单和真实赛果结算都会积累经验。</Text>
               <Pressable style={styles.lightButton} onPress={() => openPage("真实数据")}><Text style={styles.lightButtonText}>从真实赔率开始模拟</Text></Pressable>
             </View>
             <SectionTitle caption="从选择、质疑到复盘，形成完整学习闭环">核心流程</SectionTitle>
@@ -484,6 +734,18 @@ export default function App() {
                 <View style={styles.teamsRow}><Team name={match.home_team} flag={match.home_team_flag_url} /><Text style={styles.versus}>对阵</Text><Team name={match.away_team} flag={match.away_team_flag_url} /></View>
                 {match.home_score !== null && match.away_score !== null ? <Text style={styles.matchScore}>{match.home_score} : {match.away_score}</Text> : <Text style={styles.muted}>尚无比分</Text>}
                 {match.last_update ? <Text style={styles.muted}>数据更新时间：{zhDate(match.last_update)}</Text> : null}
+                {match.completed && match.home_score !== null && match.away_score !== null ? (
+                  <Pressable style={styles.secondaryButton} onPress={() => startReplay({
+                    external_match_id: match.external_event_id,
+                    home_team: match.home_team,
+                    away_team: match.away_team,
+                    kickoff_time: match.kickoff_time,
+                    home_score: match.home_score as number,
+                    away_score: match.away_score as number,
+                    home_team_flag_url: match.home_team_flag_url,
+                    away_team_flag_url: match.away_team_flag_url,
+                  })}><Text style={styles.secondaryButtonText}>模拟补购胜平负票</Text></Pressable>
+                ) : null}
               </View>
             ))}
             <SectionTitle caption={`${matches.length} 场真实已完赛记录`}>2022 年世界杯历史赛果</SectionTitle>
@@ -492,6 +754,18 @@ export default function App() {
                 <View style={styles.matchMeta}><Text style={styles.matchStage}>{zhStage(match.stage)}</Text><Text style={styles.muted}>{zhDate(match.kickoff_time)}</Text></View>
                 <View style={styles.teamsRow}><Team name={match.home_team} flag={match.home_team_flag_url} /><Text style={styles.versus}>对阵</Text><Team name={match.away_team} flag={match.away_team_flag_url} /></View>
                 <Text style={styles.matchScore}>{match.home_score} : {match.away_score}</Text>
+                {match.home_score !== null && match.away_score !== null ? (
+                  <Pressable style={styles.secondaryButton} onPress={() => startReplay({
+                    external_match_id: match.external_match_id,
+                    home_team: match.home_team,
+                    away_team: match.away_team,
+                    kickoff_time: match.kickoff_time,
+                    home_score: match.home_score as number,
+                    away_score: match.away_score as number,
+                    home_team_flag_url: match.home_team_flag_url,
+                    away_team_flag_url: match.away_team_flag_url,
+                  })}><Text style={styles.secondaryButtonText}>模拟补购胜平负票</Text></Pressable>
+                ) : null}
               </View>
             ))}
           </>
@@ -499,22 +773,82 @@ export default function App() {
 
         {page === "虚拟模拟" ? (
           <>
-            <SectionTitle caption="初始 10,000 练习币；单次最多 500；仅用于学习">虚拟模拟单</SectionTitle>
+            <SectionTitle caption="1 练习币即可开始；快捷档位降低体验门槛；历史和经验永久保留">虚拟模拟单</SectionTitle>
             <View style={styles.walletRow}>
-              <View><Text style={styles.smallLabel}>可用余额</Text><Text style={styles.walletValue}>{balance.toLocaleString("zh-CN")}</Text></View>
-              <Pressable style={styles.secondaryButton} onPress={resetPractice}><Text style={styles.secondaryButtonText}>重置练习账户</Text></Pressable>
+              <View><Text style={styles.smallLabel}>可用练习币</Text><Text style={styles.walletValue}>{balance.toLocaleString("zh-CN")}</Text><Text style={styles.walletMeta}>累计补充 {profile.totalGranted.toLocaleString("zh-CN")} · 补币不计盈亏</Text></View>
+              <View style={styles.walletStats}>
+                <Text style={styles.walletStat}>正式盈亏 {realizedProfitLoss >= 0 ? "+" : ""}{realizedProfitLoss.toFixed(2)}</Text>
+                <Text style={styles.walletStat}>复盘盈亏 {replayProfitLoss >= 0 ? "+" : ""}{replayProfitLoss.toFixed(2)}</Text>
+                <Text style={styles.walletStat}>待结算敞口 {pendingExposure.toFixed(2)}</Text>
+              </View>
             </View>
+            <View style={styles.panel}>
+              <Text style={styles.panelTitle}>随意补充练习币</Text>
+              <Text style={styles.muted}>补充额度只增加可用余额，永远不计入正式盈亏或复盘盈亏。</Text>
+              <View style={styles.grantRow}>
+                <TextInput value={grantAmount} onChangeText={setGrantAmount} keyboardType="numeric" style={styles.grantInput} />
+                <Pressable style={styles.primaryButtonCompact} onPress={grantPracticeCoins}><Text style={styles.primaryButtonText}>补充练习币</Text></Pressable>
+              </View>
+              <View style={styles.quickRow}>{[100, 1000, 10000].map((amount) => (
+                <Pressable key={amount} onPress={() => setGrantAmount(String(amount))} style={styles.quickChip}><Text style={styles.quickChipText}>+{amount}</Text></Pressable>
+              ))}</View>
+            </View>
+            <Pressable style={styles.primaryButton} onPress={settleNow} disabled={liveDataLoading}>
+              <Text style={styles.primaryButtonText}>{liveDataLoading ? "正在核对真实赛果…" : "立即结算所有已结束比赛"}</Text>
+            </Pressable>
+
+            {replayMatch ? (
+              <View style={styles.replayPanel}>
+                <Text style={styles.replayBadge}>结果已知 · 模拟补购复盘票</Text>
+                <Text style={styles.panelTitle}>{zhTeam(replayMatch.home_team)} 对阵 {zhTeam(replayMatch.away_team)}</Text>
+                <Text style={styles.matchScore}>{replayMatch.home_score} : {replayMatch.away_score}</Text>
+                <Text style={styles.muted}>请选择胜平负结果。以下为固定复盘练习赔率，不冒充比赛开始前真实赔率；本票不计入正式盈亏。</Text>
+                <View style={styles.oddsRow}>
+                  {([
+                    ["home", "主胜", 2.35],
+                    ["draw", "平局", 3.2],
+                    ["away", "客胜", 2.75],
+                  ] as Array<[Selection, string, number]>).map(([value, label, price]) => (
+                    <Pressable key={value} onPress={() => setReplaySelection(value)} style={[styles.oddsCell, replaySelection === value && styles.oddsCellSelected]}>
+                      <Text style={styles.oddsLabel}>{label}</Text><Text style={styles.oddsValue}>{price.toFixed(2)}</Text><Text style={styles.oddsAction}>{replaySelection === value ? "已选择" : "选择"}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+                <Text style={styles.inputLabel}>单注练习币</Text>
+                <View style={styles.quickRow}>{[2, 10, 50, 100].map((amount) => (
+                  <Pressable key={amount} onPress={() => setReplayStake(String(amount))} style={[styles.quickChip, Number(replayStake) === amount && styles.quickChipActive]}><Text style={[styles.quickChipText, Number(replayStake) === amount && styles.quickChipTextActive]}>{amount} 币</Text></Pressable>
+                ))}</View>
+                <TextInput value={replayStake} onChangeText={setReplayStake} keyboardType="numeric" style={styles.shortInput} />
+                <Text style={styles.muted}>预计返还 {(Number(replayStake || 0) * ({ home: 2.35, draw: 3.2, away: 2.75 }[replaySelection])).toFixed(2)} 练习币</Text>
+                <Pressable style={styles.primaryButton} onPress={submitReplay}><Text style={styles.primaryButtonText}>确认模拟补购并立即结算</Text></Pressable>
+                <Pressable style={styles.secondaryButton} onPress={() => setReplayMatch(null)}><Text style={styles.secondaryButtonText}>关闭补购票</Text></Pressable>
+              </View>
+            ) : null}
             {selectedBet ? (
               <View style={styles.panel}>
                 <Text style={styles.panelTitle}>{zhTeam(selectedBet.homeTeam)} 对阵 {zhTeam(selectedBet.awayTeam)}</Text>
                 <Text style={styles.muted}>{zhDate(selectedBet.kickoffTime)}</Text>
                 <View style={styles.selectionSummary}><Text style={styles.selectionTitle}>{selectionNames[selectedBet.selection]}</Text><Text style={styles.selectionOdds}>赔率 {selectedBet.odds.toFixed(2)}</Text></View>
                 <Text style={styles.inputLabel}>虚拟投入练习币</Text>
+                <View style={styles.quickRow}>
+                  {[2, 10, 25, 50, 100].map((amount) => (
+                    <Pressable key={amount} onPress={() => setStake(String(amount))} style={[styles.quickChip, stakeNumber === amount && styles.quickChipActive]}>
+                      <Text style={[styles.quickChipText, stakeNumber === amount && styles.quickChipTextActive]}>{amount} 币</Text>
+                    </Pressable>
+                  ))}
+                </View>
                 <TextInput value={stake} onChangeText={setStake} keyboardType="numeric" style={styles.shortInput} />
                 <Text style={styles.muted}>若模拟命中，潜在返还 {potentialReturn.toLocaleString("zh-CN")} 练习币；这不是收益承诺。</Text>
-                <Text style={styles.inputLabel}>选择理由</Text>
-                <TextInput value={reason} onChangeText={setReason} multiline placeholder="写下判断依据，赛后才能复盘偏差。" placeholderTextColor="#8a9591" style={styles.input} />
-                <Pressable style={styles.primaryButton} onPress={submitSlip}><Text style={styles.primaryButtonText}>确认建立虚拟模拟单</Text></Pressable>
+                <Text style={styles.inputLabel}>选择理由（可选，填写可多得 7 点经验）</Text>
+                <View style={styles.quickReasonList}>
+                  {quickReasons.map((item) => (
+                    <Pressable key={item} onPress={() => setReason(item)} style={[styles.reasonChip, reason === item && styles.reasonChipActive]}>
+                      <Text style={styles.reasonChipText}>{item}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+                <TextInput value={reason} onChangeText={setReason} multiline placeholder="可直接建立模拟单，也可以写下判断依据以增加纪律分。" placeholderTextColor="#8a9591" style={styles.input} />
+                <Pressable style={styles.primaryButton} onPress={submitSlip}><Text style={styles.primaryButtonText}>用 {stakeNumber || 0} 练习币立即出票</Text></Pressable>
                 <Pressable style={styles.secondaryButton} onPress={() => setPage("多角色分析")}><Text style={styles.secondaryButtonText}>先让多角色会审</Text></Pressable>
               </View>
             ) : <Text style={styles.dataMessage}>请先到“真实数据”页面选择一个真实赔率。</Text>}
@@ -526,6 +860,8 @@ export default function App() {
                 <Text style={styles.slipLine}>选择：{selectionNames[slip.selection]} · 固定赔率：{slip.odds.toFixed(2)}</Text>
                 <Text style={styles.slipLine}>投入：{slip.stake} · 潜在返还：{slip.potentialReturn}</Text>
                 <Text style={styles.muted}>理由：{slip.reason}</Text>
+                <Text style={styles.muted}>票种：{slip.mode || "赛前模拟"} · 票号：{slip.id}</Text>
+                {slip.payout !== undefined ? <Text style={styles.slipLine}>实际返还：{slip.payout} · 获得经验：{slip.experienceEarned}</Text> : <Text style={styles.muted}>建单经验：{slip.experienceEarned || 0}</Text>}
               </View>
             ))}
           </>
@@ -554,13 +890,31 @@ export default function App() {
             {panel ? (
               <View style={styles.coordinatorCard}>
                 <Text style={styles.learningLabel}>主教练·裁决官</Text>
+                <Text style={styles.learningLabel}>最终虚拟行动建议</Text>
                 <Text style={styles.coordinatorDecision}>{panel.coordinator.decision}</Text>
                 <Text style={styles.learningSummary}>{panel.coordinator.summary}</Text>
+                <Text style={styles.learningLabel}>行动理由</Text><Text style={styles.learningSummary}>{panel.coordinator.action_reason}</Text>
+                <Text style={styles.learningLabel}>执行条件</Text><Text style={styles.learningSummary}>{panel.coordinator.entry_condition}</Text>
                 <Text style={styles.learningLabel}>核心分歧</Text><Text style={styles.learningSummary}>{panel.coordinator.disagreements}</Text>
-                <Text style={styles.learningLabel}>虚拟仓位上限</Text><Text style={styles.coordinatorLimit}>{panel.coordinator.virtual_stake_limit} 练习币</Text>
+                <Text style={styles.learningLabel}>建议投入 / 仓位上限</Text><Text style={styles.coordinatorLimit}>{panel.coordinator.recommended_virtual_stake} / {panel.coordinator.virtual_stake_limit} 练习币</Text>
                 <Text style={styles.exercise}>复盘问题：{panel.coordinator.review_question}</Text>
+                {panel.coordinator.recommended_virtual_stake > 0 ? (
+                  <Pressable style={styles.lightButton} onPress={() => {
+                    setStake(String(panel.coordinator.recommended_virtual_stake));
+                    setReason(panel.coordinator.action_reason);
+                    setPage("虚拟模拟");
+                  }}><Text style={styles.lightButtonText}>按建议金额立即出票</Text></Pressable>
+                ) : <Text style={styles.warning}>本次明确建议观望，不出票。会审历史和经验仍会保留。</Text>}
               </View>
             ) : null}
+            <SectionTitle caption="永久保存在当前设备，可重新查看角色观点和最终建议">会审历史</SectionTitle>
+            {panelHistory.length === 0 ? <Text style={styles.dataMessage}>尚无会审历史。</Text> : panelHistory.map((item) => (
+              <Pressable key={item.id} style={styles.historyCard} onPress={() => { setSelectedBet(item.bet); setPanel(item.panel); }}>
+                <View style={styles.matchMeta}><Text style={styles.panelTitle}>{zhTeam(item.bet.homeTeam)} 对阵 {zhTeam(item.bet.awayTeam)}</Text><Text style={styles.muted}>{zhDate(item.createdAt)}</Text></View>
+                <Text style={styles.slipLine}>{selectionNames[item.bet.selection]} · 赔率 {item.bet.odds.toFixed(2)} · {item.panel.coordinator.decision}</Text>
+                <Text numberOfLines={2} style={styles.muted}>{item.panel.coordinator.action_reason}</Text>
+              </Pressable>
+            ))}
           </>
         ) : null}
 
@@ -648,9 +1002,12 @@ const styles = StyleSheet.create({
   heroLabel: { color: "#8dd1c3", fontSize: 12, fontWeight: "800", letterSpacing: 1.5 },
   heroBalance: { color: "#ffffff", fontSize: 34, fontWeight: "900" },
   heroText: { color: "#d8e7e3", fontSize: 14, lineHeight: 22 },
+  progressTrack: { height: 7, backgroundColor: "#31564f", borderRadius: 99, overflow: "hidden" },
+  progressFill: { height: 7, backgroundColor: "#8dd1c3", borderRadius: 99 },
   lightButton: { backgroundColor: "#ffffff", borderRadius: 14, padding: 14, alignItems: "center", marginTop: 5 },
   lightButtonText: { color: "#0d685a", fontWeight: "900" },
   primaryButton: { backgroundColor: "#0d7565", borderRadius: 14, padding: 15, alignItems: "center", marginTop: 4 },
+  primaryButtonCompact: { backgroundColor: "#0d7565", borderRadius: 12, paddingHorizontal: 15, paddingVertical: 12, alignItems: "center" },
   primaryButtonText: { color: "#ffffff", fontSize: 15, fontWeight: "800" },
   secondaryButton: { borderWidth: 1, borderColor: "#9eb7b1", borderRadius: 13, padding: 12, alignItems: "center" },
   secondaryButtonText: { color: "#0d685a", fontWeight: "800" },
@@ -687,12 +1044,29 @@ const styles = StyleSheet.create({
   matchScore: { color: "#0d685a", fontSize: 24, fontWeight: "900" },
   oddsRow: { flexDirection: "row", gap: 8 },
   oddsCell: { flex: 1, backgroundColor: "#e7f2ef", borderRadius: 12, padding: 10, alignItems: "center", gap: 3 },
+  oddsCellSelected: { backgroundColor: "#bce4da", borderWidth: 2, borderColor: "#0d7565" },
   oddsLabel: { color: "#56706a", fontSize: 11, fontWeight: "700" },
   oddsValue: { color: "#0d685a", fontSize: 17, fontWeight: "900" },
   oddsAction: { color: "#0d685a", fontSize: 10, fontWeight: "800", marginTop: 3 },
   walletRow: { backgroundColor: "#173e37", borderRadius: 18, padding: 18, flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 12 },
   smallLabel: { color: "#8dd1c3", fontSize: 11, fontWeight: "800" },
   walletValue: { color: "#ffffff", fontSize: 28, fontWeight: "900" },
+  walletMeta: { color: "#b7d4cd", fontSize: 11, marginTop: 4 },
+  walletStats: { alignItems: "flex-end", gap: 5 },
+  walletStat: { color: "#ffffff", fontSize: 12, fontWeight: "800" },
+  grantRow: { flexDirection: "row", gap: 8, alignItems: "center" },
+  grantInput: { flex: 1, borderWidth: 1, borderColor: "#d4d8d5", borderRadius: 12, padding: 12, color: "#173e37", fontSize: 16, fontWeight: "800" },
+  quickRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  quickChip: { borderWidth: 1, borderColor: "#b8c8c4", backgroundColor: "#ffffff", borderRadius: 99, paddingHorizontal: 12, paddingVertical: 8 },
+  quickChipActive: { backgroundColor: "#0d7565", borderColor: "#0d7565" },
+  quickChipText: { color: "#0d685a", fontSize: 12, fontWeight: "800" },
+  quickChipTextActive: { color: "#ffffff" },
+  quickReasonList: { flexDirection: "row", flexWrap: "wrap", gap: 7 },
+  reasonChip: { backgroundColor: "#eef4f2", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7 },
+  reasonChipActive: { backgroundColor: "#d9eee8", borderWidth: 1, borderColor: "#0d7565" },
+  reasonChipText: { color: "#45645d", fontSize: 11, fontWeight: "700" },
+  replayPanel: { backgroundColor: "#fff8df", borderWidth: 2, borderColor: "#d4a632", borderRadius: 20, padding: 18, gap: 13 },
+  replayBadge: { color: "#654800", backgroundColor: "#ffe49a", alignSelf: "flex-start", borderRadius: 99, paddingHorizontal: 10, paddingVertical: 6, fontSize: 11, fontWeight: "900" },
   selectionSummary: { backgroundColor: "#d9eee8", padding: 13, borderRadius: 12, flexDirection: "row", justifyContent: "space-between" },
   selectionTitle: { color: "#173e37", fontWeight: "900" },
   selectionOdds: { color: "#0d685a", fontWeight: "900" },
