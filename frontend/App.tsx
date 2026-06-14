@@ -16,7 +16,7 @@ const API_BASE = (process.env.EXPO_PUBLIC_API_BASE_URL || "http://localhost:3000
 const INITIAL_BALANCE = 10_000;
 const MAX_STAKE = 500;
 
-type Page = "首页" | "真实数据" | "虚拟模拟" | "多角色分析" | "学习助手" | "系统状态" | "使用说明";
+type Page = "首页" | "真实数据" | "比赛下单" | "虚拟模拟" | "多角色分析" | "学习助手" | "系统状态" | "使用说明";
 type Selection = "home" | "draw" | "away";
 
 type ConfigStatus = {
@@ -89,6 +89,30 @@ type ReplayMatch = {
   away_team_flag_url: string | null;
 };
 
+type OrderMatch = {
+  eventId: string;
+  homeTeam: string;
+  awayTeam: string;
+  homeFlag: string | null;
+  awayFlag: string | null;
+  kickoffTime: string;
+  mode: "赛前模拟" | "赛后复盘";
+  score?: { home: number; away: number };
+  selections: Array<{ selection: Selection; odds: number }>;
+};
+
+type OrderPick = {
+  id: string;
+  market: "胜平负" | "让球胜平负" | "猜比分" | "总进球";
+  label: string;
+  odds: number;
+  selection?: Selection;
+  handicap?: number;
+  exactScore?: string;
+  totalGoals?: number | "7+";
+  realOdds: boolean;
+};
+
 type SelectedBet = {
   eventId: string;
   homeTeam: string;
@@ -111,6 +135,11 @@ type PracticeSlip = SelectedBet & {
   payout?: number;
   experienceEarned?: number;
   mode?: "赛前模拟" | "赛后复盘";
+  market?: "胜平负" | "让球胜平负" | "猜比分" | "总进球";
+  pickLabel?: string;
+  handicap?: number;
+  exactScore?: string;
+  totalGoals?: number | "7+";
 };
 
 type AgentOpinion = {
@@ -239,6 +268,67 @@ function sameMatch(slip: PracticeSlip, score: CurrentScore) {
   return teamsMatch && kickoffGap <= 24 * 60 * 60 * 1000;
 }
 
+function resultSelection(homeScore: number, awayScore: number): Selection {
+  return homeScore > awayScore ? "home" : homeScore < awayScore ? "away" : "draw";
+}
+
+function slipWins(slip: PracticeSlip, homeScore: number, awayScore: number) {
+  if (slip.market === "猜比分") {
+    const actual = `${homeScore}:${awayScore}`;
+    if (!slip.exactScore?.startsWith("other-")) return slip.exactScore === actual;
+    const listed = new Set(scorePicks.filter((pick) => !pick.exactScore?.startsWith("other-")).map((pick) => pick.exactScore));
+    if (listed.has(actual)) return false;
+    return slip.exactScore === `other-${resultSelection(homeScore, awayScore)}`;
+  }
+  if (slip.market === "总进球") {
+    const total = homeScore + awayScore;
+    return slip.totalGoals === "7+" ? total >= 7 : slip.totalGoals === total;
+  }
+  if (slip.market === "让球胜平负") {
+    return slip.selection === resultSelection(homeScore + (slip.handicap || 0), awayScore);
+  }
+  return slip.selection === resultSelection(homeScore, awayScore);
+}
+
+const handicapPicks: OrderPick[] = [
+  { id: "h-1-home", market: "让球胜平负", label: "让 1 球·主胜", odds: 3.1, selection: "home", handicap: -1, realOdds: false },
+  { id: "h-1-draw", market: "让球胜平负", label: "让 1 球·平局", odds: 3.6, selection: "draw", handicap: -1, realOdds: false },
+  { id: "h-1-away", market: "让球胜平负", label: "让 1 球·客胜", odds: 1.85, selection: "away", handicap: -1, realOdds: false },
+  { id: "h-2-home", market: "让球胜平负", label: "让 2 球·主胜", odds: 5.2, selection: "home", handicap: -2, realOdds: false },
+  { id: "h-2-draw", market: "让球胜平负", label: "让 2 球·平局", odds: 4.3, selection: "draw", handicap: -2, realOdds: false },
+  { id: "h-2-away", market: "让球胜平负", label: "让 2 球·客胜", odds: 1.35, selection: "away", handicap: -2, realOdds: false },
+];
+
+const scorePicks: OrderPick[] = [
+  ["0:0", 7], ["1:0", 6], ["0:1", 7], ["1:1", 5.5], ["2:0", 8], ["0:2", 10],
+  ["2:1", 7.5], ["1:2", 9], ["2:2", 11], ["3:0", 13], ["0:3", 17], ["3:1", 12], ["1:3", 15], ["3:2", 18], ["2:3", 20],
+  ["4:0", 24], ["0:4", 32], ["4:1", 22], ["1:4", 28], ["4:2", 30], ["2:4", 36], ["5:0", 45], ["0:5", 55], ["5:1", 42], ["1:5", 50], ["5:2", 52], ["2:5", 60],
+].map(([score, odds]) => ({
+  id: `score-${score}`,
+  market: "猜比分" as const,
+  label: String(score),
+  odds: Number(odds),
+  exactScore: String(score),
+  realOdds: false,
+}));
+
+scorePicks.push(
+  { id: "score-other-home", market: "猜比分", label: "胜其他", odds: 25, exactScore: "other-home", realOdds: false },
+  { id: "score-other-draw", market: "猜比分", label: "平其他", odds: 18, exactScore: "other-draw", realOdds: false },
+  { id: "score-other-away", market: "猜比分", label: "负其他", odds: 30, exactScore: "other-away", realOdds: false },
+);
+
+const totalGoalPicks: OrderPick[] = [
+  [0, 9], [1, 5.5], [2, 3.8], [3, 3.5], [4, 4.8], [5, 7], [6, 11], ["7+", 15],
+].map(([goals, odds]) => ({
+  id: `goals-${goals}`,
+  market: "总进球" as const,
+  label: `${goals} 球`,
+  odds: Number(odds),
+  totalGoals: goals as number | "7+",
+  realOdds: false,
+}));
+
 function SectionTitle({ children, caption }: { children: string; caption?: string }) {
   return (
     <View style={styles.sectionHeading}>
@@ -301,11 +391,18 @@ export default function App() {
   const [replayMatch, setReplayMatch] = useState<ReplayMatch | null>(null);
   const [replaySelection, setReplaySelection] = useState<Selection>("home");
   const [replayStake, setReplayStake] = useState("10");
+  const [orderMatch, setOrderMatch] = useState<OrderMatch | null>(null);
+  const [orderPicks, setOrderPicks] = useState<OrderPick[]>([]);
+  const [orderMultiplier, setOrderMultiplier] = useState(1);
+  const [orderReason, setOrderReason] = useState("");
 
   const stakeNumber = Number(stake) || 0;
   const potentialReturn = selectedBet ? Math.round(stakeNumber * selectedBet.odds * 100) / 100 : 0;
   const level = Math.floor(profile.experience / 100) + 1;
   const levelProgress = profile.experience % 100;
+  const orderUnitStake = 2;
+  const orderStakePerSelection = orderUnitStake * orderMultiplier;
+  const orderTotalStake = orderStakePerSelection * orderPicks.length;
 
   const loadStatus = useCallback(async () => {
     setLoading(true);
@@ -351,8 +448,7 @@ export default function App() {
       if (slip.status !== "待结算" || slip.mode === "赛后复盘") return slip;
       const score = scores.find((item) => sameMatch(slip, item));
       if (!score?.completed || score.home_score === null || score.away_score === null) return slip;
-      const result: Selection = score.home_score > score.away_score ? "home" : score.home_score < score.away_score ? "away" : "draw";
-      const won = result === slip.selection;
+      const won = slipWins(slip, score.home_score, score.away_score);
       const payout = won ? slip.potentialReturn : 0;
       const experienceEarned = won ? 60 : 35;
       payoutTotal += payout;
@@ -453,6 +549,135 @@ export default function App() {
     setStake("25");
     setPage("虚拟模拟");
     setSuccess("");
+  };
+
+  const openOrderCenter = (event: Odds) => {
+    setOrderMatch({
+      eventId: event.external_event_id,
+      homeTeam: event.home_team,
+      awayTeam: event.away_team,
+      homeFlag: event.home_team_flag_url,
+      awayFlag: event.away_team_flag_url,
+      kickoffTime: event.kickoff_time,
+      mode: "赛前模拟",
+      selections: event.selections,
+    });
+    setOrderPicks([]);
+    setOrderMultiplier(1);
+    setOrderReason("");
+    setPanel(null);
+    setPage("比赛下单");
+    setError("");
+    setSuccess("");
+  };
+
+  const openReplayOrderCenter = (match: ReplayMatch) => {
+    setOrderMatch({
+      eventId: match.external_match_id,
+      homeTeam: match.home_team,
+      awayTeam: match.away_team,
+      homeFlag: match.home_team_flag_url,
+      awayFlag: match.away_team_flag_url,
+      kickoffTime: match.kickoff_time,
+      mode: "赛后复盘",
+      score: { home: match.home_score, away: match.away_score },
+      selections: [
+        { selection: "home", odds: 2.35 },
+        { selection: "draw", odds: 3.2 },
+        { selection: "away", odds: 2.75 },
+      ],
+    });
+    setOrderPicks([]);
+    setOrderMultiplier(1);
+    setOrderReason("赛后补购复盘：结果已知，仅练习组合选择、倍数和返还计算。");
+    setPanel(null);
+    setPage("比赛下单");
+    setError("");
+    setSuccess("已进入赛后补购下单中心。复盘票不计入正式盈亏。");
+  };
+
+  const toggleOrderPick = (pick: OrderPick) => {
+    setOrderPicks((current) =>
+      current.some((item) => item.id === pick.id)
+        ? current.filter((item) => item.id !== pick.id)
+        : [...current, pick],
+    );
+  };
+
+  const submitIntegratedOrder = async () => {
+    if (!orderMatch || orderPicks.length === 0) return setError("请至少选择一个玩法选项。");
+    if (orderTotalStake > balance) return setError("练习币余额不足，可以先在虚拟模拟页面补充额度。");
+    const now = new Date().toISOString();
+    let replayPayout = 0;
+    const tickets: PracticeSlip[] = orderPicks.map((pick) => {
+      const selection = pick.selection || "draw";
+      const won = orderMatch.score ? slipWins({
+        eventId: orderMatch.eventId,
+        homeTeam: orderMatch.homeTeam,
+        awayTeam: orderMatch.awayTeam,
+        homeFlag: orderMatch.homeFlag,
+        awayFlag: orderMatch.awayFlag,
+        kickoffTime: orderMatch.kickoffTime,
+        selection,
+        odds: pick.odds,
+        id: "",
+        stake: orderStakePerSelection,
+        potentialReturn: 0,
+        reason: "",
+        status: "待结算",
+        createdAt: now,
+        market: pick.market,
+        handicap: pick.handicap,
+        exactScore: pick.exactScore,
+        totalGoals: pick.totalGoals,
+      }, orderMatch.score.home, orderMatch.score.away) : false;
+      const payout = orderMatch.mode === "赛后复盘" && won ? orderStakePerSelection * pick.odds : undefined;
+      if (payout) replayPayout += payout;
+      return {
+        id: `${orderMatch.mode === "赛后复盘" ? "replay" : "ticket"}-${orderMatch.eventId}-${pick.id}-${Date.now()}`,
+        eventId: orderMatch.eventId,
+        homeTeam: orderMatch.homeTeam,
+        awayTeam: orderMatch.awayTeam,
+        homeFlag: orderMatch.homeFlag,
+        awayFlag: orderMatch.awayFlag,
+        kickoffTime: orderMatch.kickoffTime,
+        selection,
+        odds: pick.odds,
+        stake: orderStakePerSelection,
+        potentialReturn: Math.round(orderStakePerSelection * pick.odds * 100) / 100,
+        reason: orderReason.trim() || "整合下单中心快速出票。",
+        status: orderMatch.mode === "赛后复盘" ? (won ? "已命中" : "未命中") : "待结算",
+        createdAt: now,
+        settledAt: orderMatch.mode === "赛后复盘" ? now : undefined,
+        payout,
+        experienceEarned: orderMatch.mode === "赛后复盘" ? 10 : 8,
+        mode: orderMatch.mode,
+        market: pick.market,
+        pickLabel: pick.label,
+        handicap: pick.handicap,
+        exactScore: pick.exactScore,
+        totalGoals: pick.totalGoals,
+      };
+    });
+    const nextSlips = [...tickets, ...slips].slice(0, 120);
+    const nextBalance = Math.round((balance - orderTotalStake + replayPayout) * 100) / 100;
+    const experienceEarned = tickets.length * (orderMatch.mode === "赛后复盘" ? 10 : 8);
+    const nextProfile = {
+      ...profile,
+      experience: profile.experience + experienceEarned,
+      discipline: profile.discipline + (orderReason.trim() ? 2 : 0),
+      slipsCreated: profile.slipsCreated + tickets.length,
+    };
+    setSlips(nextSlips);
+    setBalance(nextBalance);
+    setProfile(nextProfile);
+    setError("");
+    setSuccess(`${orderPicks.length} 注已出票，总投入 ${orderTotalStake} 练习币，获得 ${experienceEarned} 点经验。`);
+    await Promise.all([
+      AsyncStorage.setItem(storageKeys.slips, JSON.stringify(nextSlips)),
+      AsyncStorage.setItem(storageKeys.balance, String(nextBalance)),
+      AsyncStorage.setItem(storageKeys.profile, JSON.stringify(nextProfile)),
+    ]);
   };
 
   const submitSlip = async () => {
@@ -589,6 +814,57 @@ export default function App() {
     }
   };
 
+  const runOrderPanel = async () => {
+    if (!orderMatch || orderPicks.length === 0) return setError("请先选择至少一个玩法选项，再启动会审。");
+    const focusPick = orderPicks[0];
+    const focusSelection = focusPick.selection || "draw";
+    const focusOdds = focusPick.odds;
+    const bet: SelectedBet = {
+      eventId: orderMatch.eventId,
+      homeTeam: orderMatch.homeTeam,
+      awayTeam: orderMatch.awayTeam,
+      homeFlag: orderMatch.homeFlag,
+      awayFlag: orderMatch.awayFlag,
+      kickoffTime: orderMatch.kickoffTime,
+      selection: focusSelection,
+      odds: focusOdds,
+    };
+    setPanelLoading(true);
+    setPanel(null);
+    setError("");
+    try {
+      const response = await fetch(`${API_BASE}/api/ai/strategy-panel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          home_team: bet.homeTeam,
+          away_team: bet.awayTeam,
+          selection: bet.selection,
+          odds: bet.odds,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "多角色分析失败");
+      const historyItem: PanelHistoryItem = { id: `${bet.eventId}-${bet.selection}-${Date.now()}`, bet, panel: payload, createdAt: new Date().toISOString() };
+      const nextHistory = [historyItem, ...panelHistory].slice(0, 30);
+      const nextProfile = { ...profile, experience: profile.experience + 20, discipline: profile.discipline + 3, panelsCompleted: profile.panelsCompleted + 1 };
+      setSelectedBet(bet);
+      setPanel(payload);
+      setPanelHistory(nextHistory);
+      setProfile(nextProfile);
+      if (payload.coordinator.action_reason) setOrderReason(payload.coordinator.action_reason);
+      setSuccess("会审建议已加入本场下单中心，并保存到会审历史。");
+      await Promise.all([
+        AsyncStorage.setItem(storageKeys.panels, JSON.stringify(nextHistory)),
+        AsyncStorage.setItem(storageKeys.profile, JSON.stringify(nextProfile)),
+      ]);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "多角色分析失败");
+    } finally {
+      setPanelLoading(false);
+    }
+  };
+
   const runPanel = async () => {
     if (!selectedBet) return setError("请先选择一个真实赔率结果。");
     setPanelLoading(true);
@@ -666,7 +942,7 @@ export default function App() {
         </View>
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.nav}>
-          {(["首页", "真实数据", "虚拟模拟", "多角色分析", "学习助手", "系统状态", "使用说明"] as Page[]).map((item) => (
+          {(["首页", "真实数据", ...(orderMatch ? ["比赛下单" as Page] : []), "虚拟模拟", "多角色分析", "学习助手", "系统状态", "使用说明"] as Page[]).map((item) => (
             <Pressable key={item} onPress={() => openPage(item)} style={[styles.navItem, page === item && styles.navItemActive]}>
               <Text style={[styles.navText, page === item && styles.navTextActive]}>{item}</Text>
             </Pressable>
@@ -718,13 +994,14 @@ export default function App() {
                 <View style={styles.teamsRow}><Team name={item.home_team} flag={item.home_team_flag_url} /><Text style={styles.versus}>对阵</Text><Team name={item.away_team} flag={item.away_team_flag_url} /></View>
                 <View style={styles.oddsRow}>
                   {item.selections.map((selection) => (
-                    <Pressable key={selection.selection} style={styles.oddsCell} onPress={() => chooseBet(item, selection)}>
+                    <View key={selection.selection} style={styles.oddsCell}>
                       <Text style={styles.oddsLabel}>{selectionNames[selection.selection]}</Text>
                       <Text style={styles.oddsValue}>{selection.odds.toFixed(2)}</Text>
-                      <Text style={styles.oddsAction}>选择并模拟</Text>
-                    </Pressable>
+                      <Text style={styles.oddsAction}>真实赔率</Text>
+                    </View>
                   ))}
                 </View>
+                <Pressable style={styles.primaryButton} onPress={() => openOrderCenter(item)}><Text style={styles.primaryButtonText}>进入本场整合下单中心</Text></Pressable>
               </View>
             ))}
             <SectionTitle caption={`${currentScores.length} 场本届赛事；比分由数据源实时返回，近三天赛果可查询`}>本届实时与近期比分</SectionTitle>
@@ -735,7 +1012,7 @@ export default function App() {
                 {match.home_score !== null && match.away_score !== null ? <Text style={styles.matchScore}>{match.home_score} : {match.away_score}</Text> : <Text style={styles.muted}>尚无比分</Text>}
                 {match.last_update ? <Text style={styles.muted}>数据更新时间：{zhDate(match.last_update)}</Text> : null}
                 {match.completed && match.home_score !== null && match.away_score !== null ? (
-                  <Pressable style={styles.secondaryButton} onPress={() => startReplay({
+                  <Pressable style={styles.secondaryButton} onPress={() => openReplayOrderCenter({
                     external_match_id: match.external_event_id,
                     home_team: match.home_team,
                     away_team: match.away_team,
@@ -744,7 +1021,7 @@ export default function App() {
                     away_score: match.away_score as number,
                     home_team_flag_url: match.home_team_flag_url,
                     away_team_flag_url: match.away_team_flag_url,
-                  })}><Text style={styles.secondaryButtonText}>模拟补购胜平负票</Text></Pressable>
+                  })}><Text style={styles.secondaryButtonText}>进入本场赛后整合补购中心</Text></Pressable>
                 ) : null}
               </View>
             ))}
@@ -755,7 +1032,7 @@ export default function App() {
                 <View style={styles.teamsRow}><Team name={match.home_team} flag={match.home_team_flag_url} /><Text style={styles.versus}>对阵</Text><Team name={match.away_team} flag={match.away_team_flag_url} /></View>
                 <Text style={styles.matchScore}>{match.home_score} : {match.away_score}</Text>
                 {match.home_score !== null && match.away_score !== null ? (
-                  <Pressable style={styles.secondaryButton} onPress={() => startReplay({
+                  <Pressable style={styles.secondaryButton} onPress={() => openReplayOrderCenter({
                     external_match_id: match.external_match_id,
                     home_team: match.home_team,
                     away_team: match.away_team,
@@ -764,10 +1041,98 @@ export default function App() {
                     away_score: match.away_score as number,
                     home_team_flag_url: match.home_team_flag_url,
                     away_team_flag_url: match.away_team_flag_url,
-                  })}><Text style={styles.secondaryButtonText}>模拟补购胜平负票</Text></Pressable>
+                  })}><Text style={styles.secondaryButtonText}>进入本场赛后整合补购中心</Text></Pressable>
                 ) : null}
               </View>
             ))}
+          </>
+        ) : null}
+
+        {page === "比赛下单" ? (
+          <>
+            <SectionTitle caption="胜平负使用真实赔率；让球与比分使用明确标注的虚拟练习赔率">比赛整合下单中心</SectionTitle>
+            {orderMatch ? (
+              <>
+                <View style={styles.orderHero}>
+                  <View style={styles.matchMeta}>
+                    <Text style={styles.replayBadge}>{orderMatch.mode === "赛前模拟" ? "赛前正式模拟" : "结果已知 · 赛后复盘补购"}</Text>
+                    <Text style={styles.muted}>{zhDate(orderMatch.kickoffTime)}</Text>
+                  </View>
+                  <View style={styles.teamsRow}><Team name={orderMatch.homeTeam} flag={orderMatch.homeFlag} /><Text style={styles.versus}>对阵</Text><Team name={orderMatch.awayTeam} flag={orderMatch.awayFlag} /></View>
+                  {orderMatch.score ? <Text style={styles.matchScore}>{orderMatch.score.home} : {orderMatch.score.away}</Text> : null}
+                  <Text style={styles.muted}>每个选项按一注计算，每注 2 练习币 × 倍数。可以跨玩法多选，系统分别出票并分别结算。</Text>
+                </View>
+
+                <View style={styles.marketCard}>
+                  <View style={styles.matchMeta}><Text style={styles.marketTitle}>胜平负</Text><Text style={styles.realOddsBadge}>{orderMatch.mode === "赛前模拟" ? "真实赔率" : "复盘练习赔率"}</Text></View>
+                  <View style={styles.oddsRow}>
+                    {orderMatch.selections.map((item) => {
+                      const pick: OrderPick = { id: `h2h-${item.selection}`, market: "胜平负", label: selectionNames[item.selection], odds: item.odds, selection: item.selection, realOdds: orderMatch.mode === "赛前模拟" };
+                      const selected = orderPicks.some((current) => current.id === pick.id);
+                      return <Pressable key={pick.id} onPress={() => toggleOrderPick(pick)} style={[styles.oddsCell, selected && styles.oddsCellSelected]}><Text style={styles.oddsLabel}>{pick.label}</Text><Text style={styles.oddsValue}>{pick.odds.toFixed(2)}</Text><Text style={styles.oddsAction}>{selected ? "已选" : "选择"}</Text></Pressable>;
+                    })}
+                  </View>
+                </View>
+
+                <View style={styles.marketCard}>
+                  <View style={styles.matchMeta}><Text style={styles.marketTitle}>让球胜平负</Text><Text style={styles.practiceOddsBadge}>虚拟练习赔率</Text></View>
+                  <Text style={styles.muted}>主队分别让 1 球、让 2 球后，再判断主胜、平局或客胜。</Text>
+                  {[-1, -2].map((handicap) => (
+                    <View key={handicap} style={styles.handicapRow}>
+                      <Text style={styles.handicapLabel}>主队让 {Math.abs(handicap)} 球</Text>
+                      <View style={styles.oddsRow}>
+                        {handicapPicks.filter((pick) => pick.handicap === handicap).map((pick) => {
+                          const selected = orderPicks.some((current) => current.id === pick.id);
+                          return <Pressable key={pick.id} onPress={() => toggleOrderPick(pick)} style={[styles.oddsCell, selected && styles.oddsCellSelected]}><Text style={styles.oddsLabel}>{selectionNames[pick.selection as Selection]}</Text><Text style={styles.oddsValue}>{pick.odds.toFixed(2)}</Text></Pressable>;
+                        })}
+                      </View>
+                    </View>
+                  ))}
+                </View>
+
+                <View style={styles.marketCard}>
+                  <View style={styles.matchMeta}><Text style={styles.marketTitle}>猜比分</Text><Text style={styles.practiceOddsBadge}>虚拟练习赔率</Text></View>
+                  <Text style={styles.muted}>选择最终常规比分；可多选多个比分，分别按注出票。</Text>
+                  <View style={styles.scoreGrid}>
+                    {scorePicks.map((pick) => {
+                      const selected = orderPicks.some((current) => current.id === pick.id);
+                      return <Pressable key={pick.id} onPress={() => toggleOrderPick(pick)} style={[styles.scoreCell, selected && styles.scoreCellSelected]}><Text style={styles.scoreLabel}>{pick.label}</Text><Text style={styles.scoreOdds}>{pick.odds.toFixed(2)}</Text></Pressable>;
+                    })}
+                  </View>
+                </View>
+
+                <View style={styles.marketCard}>
+                  <View style={styles.matchMeta}><Text style={styles.marketTitle}>总进球数</Text><Text style={styles.practiceOddsBadge}>虚拟练习赔率</Text></View>
+                  <Text style={styles.muted}>按双方终场总进球数结算，7 球及以上统一归入“7+”。</Text>
+                  <View style={styles.scoreGrid}>
+                    {totalGoalPicks.map((pick) => {
+                      const selected = orderPicks.some((current) => current.id === pick.id);
+                      return <Pressable key={pick.id} onPress={() => toggleOrderPick(pick)} style={[styles.scoreCell, selected && styles.scoreCellSelected]}><Text style={styles.scoreLabel}>{pick.label}</Text><Text style={styles.scoreOdds}>{pick.odds.toFixed(2)}</Text></Pressable>;
+                    })}
+                  </View>
+                </View>
+
+                <View style={styles.notice}><Text style={styles.noticeTitle}>为什么暂时没有半全场？</Text><Text style={styles.noticeText}>当前真实比分源只稳定提供终场比分，没有半场比分。半全场无法可靠结算，因此不使用虚构数据冒充该玩法。</Text></View>
+
+                <View style={styles.orderSummary}>
+                  <Text style={styles.panelTitle}>下单汇总</Text>
+                  <Text style={styles.slipLine}>已选 {orderPicks.length} 注 · 每注 2 币 · {orderMultiplier} 倍</Text>
+                  <View style={styles.quickRow}>{[1, 5, 10, 20].map((value) => <Pressable key={value} onPress={() => setOrderMultiplier(value)} style={[styles.quickChip, orderMultiplier === value && styles.quickChipActive]}><Text style={[styles.quickChipText, orderMultiplier === value && styles.quickChipTextActive]}>{value} 倍</Text></Pressable>)}</View>
+                  <Text style={styles.orderTotal}>总投入 {orderTotalStake.toLocaleString("zh-CN")} 练习币</Text>
+                  {orderPicks.map((pick) => <View key={pick.id} style={styles.orderLine}><Text style={styles.orderLineText}>{pick.market} · {pick.label}</Text><Text style={styles.orderReturn}>预计返还 {(orderStakePerSelection * pick.odds).toFixed(2)}</Text></View>)}
+                  <Text style={styles.inputLabel}>下单理由（可选）</Text>
+                  <TextInput value={orderReason} onChangeText={setOrderReason} multiline placeholder="写下本场判断或使用会审建议。" placeholderTextColor="#8a9591" style={styles.input} />
+                  <Pressable style={styles.secondaryButton} onPress={runOrderPanel} disabled={panelLoading}><Text style={styles.secondaryButtonText}>{panelLoading ? "多角色正在会审…" : "让多角色审查当前首选项"}</Text></Pressable>
+                  {panel ? <View style={styles.inlineAdvice}><Text style={styles.agentName}>主教练建议：{panel.coordinator.decision}</Text><Text style={styles.muted}>{panel.coordinator.action_reason}</Text><Text style={styles.muted}>执行条件：{panel.coordinator.entry_condition}</Text></View> : null}
+                  <Pressable style={styles.primaryButton} onPress={submitIntegratedOrder}><Text style={styles.primaryButtonText}>确认出票 · 总投入 {orderTotalStake} 练习币</Text></Pressable>
+                </View>
+
+                <SectionTitle caption="本场已经建立的所有票据">本场票据历史</SectionTitle>
+                {slips.filter((slip) => slip.eventId === orderMatch.eventId).length === 0 ? <Text style={styles.dataMessage}>本场尚未出票。</Text> : slips.filter((slip) => slip.eventId === orderMatch.eventId).map((slip) => (
+                  <View key={slip.id} style={styles.slipCard}><View style={styles.matchMeta}><Text style={styles.matchStage}>{slip.status}</Text><Text style={styles.muted}>{zhDate(slip.createdAt)}</Text></View><Text style={styles.slipLine}>{slip.market || "胜平负"} · {slip.pickLabel || selectionNames[slip.selection]} · {slip.odds.toFixed(2)}</Text><Text style={styles.muted}>投入 {slip.stake} · 潜在返还 {slip.potentialReturn}</Text></View>
+                ))}
+              </>
+            ) : <Text style={styles.dataMessage}>请先从真实数据页面进入一场比赛的下单中心。</Text>}
           </>
         ) : null}
 
@@ -1067,6 +1432,24 @@ const styles = StyleSheet.create({
   reasonChipText: { color: "#45645d", fontSize: 11, fontWeight: "700" },
   replayPanel: { backgroundColor: "#fff8df", borderWidth: 2, borderColor: "#d4a632", borderRadius: 20, padding: 18, gap: 13 },
   replayBadge: { color: "#654800", backgroundColor: "#ffe49a", alignSelf: "flex-start", borderRadius: 99, paddingHorizontal: 10, paddingVertical: 6, fontSize: 11, fontWeight: "900" },
+  orderHero: { backgroundColor: "#fffdf8", borderWidth: 1, borderColor: "#dedbd1", borderRadius: 22, padding: 19, gap: 13 },
+  marketCard: { backgroundColor: "#fffdf8", borderWidth: 1, borderColor: "#dedbd1", borderRadius: 18, padding: 16, gap: 12 },
+  marketTitle: { color: "#173e37", fontSize: 17, fontWeight: "900" },
+  realOddsBadge: { color: "#0d685a", backgroundColor: "#d9eee8", borderRadius: 99, paddingHorizontal: 9, paddingVertical: 5, fontSize: 10, fontWeight: "900" },
+  practiceOddsBadge: { color: "#815b0c", backgroundColor: "#f7e8c8", borderRadius: 99, paddingHorizontal: 9, paddingVertical: 5, fontSize: 10, fontWeight: "900" },
+  handicapRow: { gap: 7, borderTopWidth: 1, borderTopColor: "#ebe8df", paddingTop: 10 },
+  handicapLabel: { color: "#173e37", fontWeight: "800", fontSize: 12 },
+  scoreGrid: { flexDirection: "row", flexWrap: "wrap", gap: 7 },
+  scoreCell: { minWidth: 67, flexGrow: 1, backgroundColor: "#eef4f2", borderWidth: 1, borderColor: "#d7e0dd", borderRadius: 10, padding: 9, alignItems: "center", gap: 2 },
+  scoreCellSelected: { backgroundColor: "#bce4da", borderColor: "#0d7565", borderWidth: 2 },
+  scoreLabel: { color: "#173e37", fontSize: 13, fontWeight: "900" },
+  scoreOdds: { color: "#0d685a", fontSize: 11, fontWeight: "800" },
+  orderSummary: { backgroundColor: "#f8f5e9", borderWidth: 2, borderColor: "#173e37", borderRadius: 20, padding: 18, gap: 12 },
+  orderTotal: { color: "#173e37", fontSize: 22, fontWeight: "900" },
+  orderLine: { flexDirection: "row", justifyContent: "space-between", gap: 8, borderTopWidth: 1, borderTopColor: "#dedbd1", paddingTop: 8 },
+  orderLineText: { color: "#173e37", flex: 1, fontSize: 12, fontWeight: "800" },
+  orderReturn: { color: "#0d685a", fontSize: 12, fontWeight: "900" },
+  inlineAdvice: { backgroundColor: "#d9eee8", borderRadius: 12, padding: 12, gap: 4 },
   selectionSummary: { backgroundColor: "#d9eee8", padding: 13, borderRadius: 12, flexDirection: "row", justifyContent: "space-between" },
   selectionTitle: { color: "#173e37", fontWeight: "900" },
   selectionOdds: { color: "#0d685a", fontWeight: "900" },
