@@ -571,7 +571,7 @@ export default function App() {
       if (matchesResponse.ok) setMatches(matchesPayload.matches || []);
       else setMatchesMessage(matchesPayload.error || "历史赛果暂不可用");
       if (oddsResponse.ok) setOdds(oddsPayload.odds || []);
-      else setOddsMessage(oddsPayload.error || "本届真实赔率暂不可用");
+      else setOddsMessage(oddsPayload.error || "2026 世界杯真实赔率暂不可用");
       if (scoresResponse.ok) {
         const scores = scoresPayload.scores || [];
         setCurrentScores(scores);
@@ -1063,9 +1063,9 @@ export default function App() {
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.container}>
         <View style={styles.brandBlock}>
-          <Text style={styles.eyebrow}>世界杯纸上竞猜</Text>
-          <Text style={styles.brandTitle}>真实赔率驱动的虚拟策略实验室</Text>
-          <Text style={styles.brandSubtitle}>选择真实比赛赔率，用练习币建立模拟单，再让不同人格的人工智能角色共同审查。全程不涉及真实资金。</Text>
+          <Text style={styles.eyebrow}>2026 世界杯纸上竞猜</Text>
+          <Text style={styles.brandTitle}>2026 世界杯虚拟策略实验室</Text>
+          <Text style={styles.brandSubtitle}>围绕 2026 世界杯真实赔率、赛程与近期比分建立模拟单，再让不同人格的人工智能角色共同审查。2022 数据仅作为历史复盘档案，全程不涉及真实资金。</Text>
         </View>
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.nav}>
@@ -1091,7 +1091,7 @@ export default function App() {
             </View>
             <SectionTitle caption="从选择、质疑到复盘，形成完整学习闭环">核心流程</SectionTitle>
             {[
-              ["01", "选择真实赔率", "查看本届真实赛程赔率与球队国旗，选择主胜、平局或客胜。", "真实数据"],
+              ["01", "选择 2026 真实赔率", "查看 2026 世界杯真实赛程赔率与球队国旗，选择主胜、平局或客胜。", "真实数据"],
               ["02", "建立虚拟模拟单", "输入练习币和选择理由，系统固定记录赔率快照与潜在回报。", "虚拟模拟"],
               ["03", "启动多角色会审", "数据分析师、反方审计员和风险管理员独立分析，由主教练裁决。", "多角色分析"],
               ["04", "学习与复盘", "完成有参考答案的练习，并保留学习历史与模拟单历史。", "学习助手"],
@@ -1105,16 +1105,16 @@ export default function App() {
 
         {page === "真实数据" ? (
           <>
-            <SectionTitle caption="赛事供应商每日同步历史赛果；赔率供应商提供本届当前赔率">真实世界杯数据</SectionTitle>
+            <SectionTitle caption="当前主要体验为 2026 世界杯；2022 数据只用于历史复盘">2026 世界杯真实数据中心</SectionTitle>
             <Pressable style={styles.primaryButton} onPress={loadLiveData} disabled={liveDataLoading}><Text style={styles.primaryButtonText}>{liveDataLoading ? "正在刷新…" : "刷新真实数据"}</Text></Pressable>
             {liveDataLoading ? <ActivityIndicator color="#0d685a" size="large" /> : null}
             <View style={styles.notice}>
-              <Text style={styles.noticeTitle}>真实覆盖范围</Text>
-              <Text style={styles.noticeText}>当前已验证：2022 年世界杯完整赛果 64 场，本届世界杯当前真实赔率、未来赛程，以及本届实时/近三天比分接口。赛事供应商免费套餐不提供更早四届，因此系统不会伪造“近五届”。</Text>
+              <Text style={styles.noticeTitle}>当前赛事：2026 世界杯</Text>
+              <Text style={styles.noticeText}>页面优先展示 2026 世界杯当前真实赔率、未来赛程，以及实时/近三天比分。页面底部另保留 2022 年世界杯 64 场完整赛果，仅用于已结束比赛复盘，不代表当前届次。</Text>
             </View>
             {matchesMessage ? <Text style={styles.dataMessage}>{matchesMessage}</Text> : null}
             {oddsMessage ? <Text style={styles.dataMessage}>{oddsMessage}</Text> : null}
-            <SectionTitle caption={`${odds.length} 场可用于虚拟模拟`}>本届当前真实赔率</SectionTitle>
+            <SectionTitle caption={`${odds.length} 场可用于虚拟模拟`}>2026 世界杯当前真实赔率</SectionTitle>
             {odds.map((item) => (
               <View key={item.external_event_id} style={styles.matchCard}>
                 <View style={styles.matchMeta}><Text style={styles.matchStage}>胜平负赔率</Text><Text style={styles.muted}>{zhDate(item.kickoff_time)}</Text></View>
@@ -1131,7 +1131,7 @@ export default function App() {
                 <Pressable style={styles.primaryButton} onPress={() => openOrderCenter(item)}><Text style={styles.primaryButtonText}>进入本场整合下单中心</Text></Pressable>
               </View>
             ))}
-            <SectionTitle caption={`${currentScores.length} 场本届赛事；比分由数据源实时返回，近三天赛果可查询`}>本届实时与近期比分</SectionTitle>
+            <SectionTitle caption={`${currentScores.length} 场 2026 世界杯赛事；比分由数据源实时返回，近三天赛果可查询`}>2026 世界杯实时与近期比分</SectionTitle>
             {currentScores.length === 0 ? <Text style={styles.dataMessage}>当前比分接口暂未返回比赛；开赛后刷新即可查看实时与近三天赛果。</Text> : currentScores.map((match) => (
               <View key={match.external_event_id} style={styles.matchCard}>
                 <View style={styles.matchMeta}><Text style={styles.matchStage}>{match.completed ? "已完赛" : "未完赛或进行中"}</Text><Text style={styles.muted}>{zhDate(match.kickoff_time)}</Text></View>
@@ -1152,7 +1152,8 @@ export default function App() {
                 ) : null}
               </View>
             ))}
-            <SectionTitle caption={`${matches.length} 场真实已完赛记录`}>2022 年世界杯历史赛果</SectionTitle>
+            <View style={styles.archiveNotice}><Text style={styles.archiveNoticeTitle}>以下为 2022 历史复盘档案，不是当前 2026 届赛事</Text><Text style={styles.muted}>保留完整历史比分、国旗和赛后补购入口，用于训练结算与复盘。</Text></View>
+            <SectionTitle caption={`${matches.length} 场真实已完赛记录，仅供历史复盘`}>2022 世界杯历史复盘档案</SectionTitle>
             {matches.map((match) => (
               <View key={match.external_match_id} style={styles.matchCard}>
                 <View style={styles.matchMeta}><Text style={styles.matchStage}>{zhStage(match.stage)}</Text><Text style={styles.muted}>{zhDate(match.kickoff_time)}</Text></View>
@@ -1490,18 +1491,18 @@ export default function App() {
             <SectionTitle caption="当前版本已具备真实数据到虚拟复盘的完整路径">使用说明</SectionTitle>
             <View style={styles.panel}>
               {[
-                ["第一步", "打开真实数据，选择一场本届比赛的真实胜平负赔率。"],
+                ["第一步", "打开真实数据，选择一场 2026 世界杯比赛的真实胜平负赔率。"],
                 ["第二步", "建立虚拟模拟单，输入练习币与选择理由。"],
                 ["第三步", "启动多角色会审，比较数据、反方与风险观点。"],
                 ["第四步", "保存模拟单并在赛后根据真实赛果复盘。"],
                 ["第五步", "使用学习助手完成练习，并对照参考答案。"],
               ].map(([step, text]) => <View key={step} style={styles.guideRow}><Text style={styles.guideStep}>{step}</Text><Text style={styles.guideText}>{text}</Text></View>)}
             </View>
-            <View style={styles.notice}><Text style={styles.noticeTitle}>数据边界与合规边界</Text><Text style={styles.noticeText}>当前真实数据包括 2022 完整赛果和本届当前赔率。更早四届与本届实时赛果需新增具备相应权限的数据源。产品只使用虚拟练习币，不提供充值、提现、支付或真实投注。</Text></View>
+            <View style={styles.notice}><Text style={styles.noticeTitle}>数据边界与合规边界</Text><Text style={styles.noticeText}>当前主赛事为 2026 世界杯，包含当前赔率、未来赛程与实时/近期比分。2022 完整赛果仅作为历史复盘档案。更早四届仍需新增具备相应权限的数据源。产品只使用虚拟练习币，不提供充值、提现、支付或真实投注。</Text></View>
           </>
         ) : null}
 
-        <Text style={styles.footer}>世界杯纸上竞猜 · 中文虚拟策略学习产品</Text>
+        <Text style={styles.footer}>2026 世界杯纸上竞猜 · 中文虚拟策略学习产品</Text>
       </ScrollView>
     </SafeAreaView>
   );
@@ -1555,6 +1556,8 @@ const styles = StyleSheet.create({
   notice: { backgroundColor: "#fff0bd", borderRadius: 16, padding: 17, gap: 5 },
   noticeTitle: { color: "#563e08", fontWeight: "800", fontSize: 15 },
   noticeText: { color: "#6e571f", fontSize: 13, lineHeight: 20 },
+  archiveNotice: { backgroundColor: "#edf1f0", borderWidth: 1, borderColor: "#c9d1ce", borderRadius: 16, padding: 16, gap: 5 },
+  archiveNoticeTitle: { color: "#43534f", fontWeight: "900", fontSize: 14 },
   panel: { backgroundColor: "#fffdf8", borderWidth: 1, borderColor: "#dedbd1", borderRadius: 20, padding: 18, gap: 14 },
   panelTitle: { color: "#173e37", fontSize: 16, fontWeight: "900" },
   inputLabel: { color: "#173e37", fontSize: 14, fontWeight: "800" },
