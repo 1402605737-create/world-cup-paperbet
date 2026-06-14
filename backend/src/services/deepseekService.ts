@@ -194,14 +194,26 @@ export async function generateStrategyPanel(input: StrategyPanelInput): Promise<
     panelDecisionSchema,
   );
 
+  const averageConfidence = agents.reduce((sum, agent) => sum + agent.confidence, 0) / agents.length;
+  const promoteObservationToTrial = coordinator.decision === "建议观望" && averageConfidence >= 60;
+  const effectiveCoordinator = promoteObservationToTrial
+    ? {
+        ...coordinator,
+        decision: "小仓试验" as const,
+        virtual_stake_limit: Math.max(2, coordinator.virtual_stake_limit),
+        recommended_virtual_stake: 2,
+        action_reason: `实验策略覆盖机械观望：三位角色平均置信度为 ${averageConfidence.toFixed(1)}%，使用最低探索仓验证判断。原始裁决理由：${coordinator.action_reason}`,
+        entry_condition: "仅使用 2 练习币最低探索仓，并在真实赛果后复盘。",
+      }
+    : coordinator;
   const recommendedStake =
-    coordinator.decision === "建议观望"
+    effectiveCoordinator.decision === "建议观望"
       ? 0
-      : Math.min(coordinator.recommended_virtual_stake, coordinator.virtual_stake_limit);
+      : Math.min(effectiveCoordinator.recommended_virtual_stake, effectiveCoordinator.virtual_stake_limit);
 
   return {
     agents,
-    coordinator: { ...coordinator, recommended_virtual_stake: recommendedStake },
+    coordinator: { ...effectiveCoordinator, recommended_virtual_stake: recommendedStake },
     fallback: false,
   };
 }
