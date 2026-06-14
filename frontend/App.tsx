@@ -140,6 +140,11 @@ type PracticeSlip = SelectedBet & {
   handicap?: number;
   exactScore?: string;
   totalGoals?: number | "7+";
+  settledScore?: { home: number; away: number };
+};
+
+type AgentSlip = PracticeSlip & {
+  agentDecision: "虚拟买入" | "小仓试验";
 };
 
 type AgentOpinion = {
@@ -221,6 +226,7 @@ const storageKeys = {
   learning: "纸上竞猜_学习历史",
   panels: "纸上竞猜_会审历史",
   profile: "纸上竞猜_成长档案",
+  agentSlips: "纸上竞猜_Agent自动模拟单",
 };
 
 const initialProfile: ExperienceProfile = {
@@ -361,6 +367,19 @@ function Team({ name, flag }: { name: string; flag: string | null }) {
   );
 }
 
+function SlipTeams({ slip }: { slip: PracticeSlip }) {
+  return (
+    <>
+      <View style={styles.teamsRow}>
+        <Team name={slip.homeTeam} flag={slip.homeFlag} />
+        <Text style={styles.versus}>对阵</Text>
+        <Team name={slip.awayTeam} flag={slip.awayFlag} />
+      </View>
+      {slip.settledScore ? <Text style={styles.matchScore}>{slip.settledScore.home} : {slip.settledScore.away}</Text> : null}
+    </>
+  );
+}
+
 export default function App() {
   const [page, setPage] = useState<Page>("首页");
   const [config, setConfig] = useState<ConfigStatus | null>(null);
@@ -395,6 +414,7 @@ export default function App() {
   const [orderPicks, setOrderPicks] = useState<OrderPick[]>([]);
   const [orderMultiplier, setOrderMultiplier] = useState(1);
   const [orderReason, setOrderReason] = useState("");
+  const [agentSlips, setAgentSlips] = useState<AgentSlip[]>([]);
 
   const stakeNumber = Number(stake) || 0;
   const potentialReturn = selectedBet ? Math.round(stakeNumber * selectedBet.odds * 100) / 100 : 0;
@@ -424,18 +444,20 @@ export default function App() {
   useEffect(() => {
     void loadStatus();
     void (async () => {
-      const [savedBalance, savedSlips, savedLearning, savedPanels, savedProfile] = await Promise.all([
+      const [savedBalance, savedSlips, savedLearning, savedPanels, savedProfile, savedAgentSlips] = await Promise.all([
         AsyncStorage.getItem(storageKeys.balance),
         AsyncStorage.getItem(storageKeys.slips),
         AsyncStorage.getItem(storageKeys.learning),
         AsyncStorage.getItem(storageKeys.panels),
         AsyncStorage.getItem(storageKeys.profile),
+        AsyncStorage.getItem(storageKeys.agentSlips),
       ]);
       if (savedBalance) setBalance(Number(savedBalance));
       if (savedSlips) setSlips(JSON.parse(savedSlips));
       if (savedLearning) setLearningHistory(JSON.parse(savedLearning));
       if (savedPanels) setPanelHistory(JSON.parse(savedPanels));
       if (savedProfile) setProfile({ ...initialProfile, ...JSON.parse(savedProfile) });
+      if (savedAgentSlips) setAgentSlips(JSON.parse(savedAgentSlips));
     })();
   }, [loadStatus]);
 
@@ -443,20 +465,55 @@ export default function App() {
     let payoutTotal = 0;
     let experienceTotal = 0;
     let settledCount = 0;
+    let enrichedCount = 0;
     const settledAt = new Date().toISOString();
     const nextSlips = slips.map((slip) => {
-      if (slip.status !== "待结算" || slip.mode === "赛后复盘") return slip;
       const score = scores.find((item) => sameMatch(slip, item));
       if (!score?.completed || score.home_score === null || score.away_score === null) return slip;
+      if (slip.status !== "待结算" || slip.mode === "赛后复盘") {
+        if (!slip.settledScore && slip.status !== "待结算") {
+          enrichedCount += 1;
+          return { ...slip, settledScore: { home: score.home_score, away: score.away_score } };
+        }
+        return slip;
+      }
       const won = slipWins(slip, score.home_score, score.away_score);
       const payout = won ? slip.potentialReturn : 0;
       const experienceEarned = won ? 60 : 35;
       payoutTotal += payout;
       experienceTotal += experienceEarned;
       settledCount += 1;
-      return { ...slip, status: won ? "已命中" as const : "未命中" as const, settledAt, payout, experienceEarned };
+      return {
+        ...slip,
+        status: won ? "已命中" as const : "未命中" as const,
+        settledAt,
+        payout,
+        experienceEarned,
+        settledScore: { home: score.home_score, away: score.away_score },
+      };
     });
-    if (settledCount === 0) return;
+    let agentSettledCount = 0;
+    const nextAgentSlips = agentSlips.map((slip) => {
+      const score = scores.find((item) => sameMatch(slip, item));
+      if (!score?.completed || score.home_score === null || score.away_score === null) return slip;
+      if (slip.status !== "待结算") {
+        if (!slip.settledScore) {
+          enrichedCount += 1;
+          return { ...slip, settledScore: { home: score.home_score, away: score.away_score } };
+        }
+        return slip;
+      }
+      const won = slipWins(slip, score.home_score, score.away_score);
+      agentSettledCount += 1;
+      return {
+        ...slip,
+        status: won ? "已命中" as const : "未命中" as const,
+        settledAt,
+        payout: won ? slip.potentialReturn : 0,
+        settledScore: { home: score.home_score, away: score.away_score },
+      };
+    });
+    if (settledCount === 0 && agentSettledCount === 0 && enrichedCount === 0) return;
     const nextBalance = Math.round((balance + payoutTotal) * 100) / 100;
     const nextProfile = {
       ...profile,
@@ -465,11 +522,13 @@ export default function App() {
       slipsSettled: profile.slipsSettled + settledCount,
     };
     setSlips(nextSlips);
+    setAgentSlips(nextAgentSlips);
     setBalance(nextBalance);
     setProfile(nextProfile);
-    setSuccess(`已按真实赛果结算 ${settledCount} 张模拟单，获得 ${experienceTotal} 点经验。`);
+    setSuccess(`已按真实赛果结算：你的票 ${settledCount} 张，Agent 票 ${agentSettledCount} 张；你获得 ${experienceTotal} 点经验。`);
     await Promise.all([
       AsyncStorage.setItem(storageKeys.slips, JSON.stringify(nextSlips)),
+      AsyncStorage.setItem(storageKeys.agentSlips, JSON.stringify(nextAgentSlips)),
       AsyncStorage.setItem(storageKeys.balance, String(nextBalance)),
       AsyncStorage.setItem(storageKeys.profile, JSON.stringify(nextProfile)),
     ]);
@@ -484,9 +543,10 @@ export default function App() {
       if (!response.ok) throw new Error(payload.error || "真实比分暂不可用");
       const scores = payload.scores || [];
       setCurrentScores(scores);
-      const before = slips.filter((item) => item.status === "待结算" && item.mode !== "赛后复盘").length;
+      const before = slips.filter((item) => item.status === "待结算" && item.mode !== "赛后复盘").length + agentSlips.filter((item) => item.status === "待结算").length;
       await settlePendingSlips(scores);
-      const matchable = slips.filter((slip) => slip.status === "待结算" && scores.some((score: CurrentScore) => score.completed && sameMatch(slip, score))).length;
+      const matchable = [...slips.filter((slip) => slip.mode !== "赛后复盘"), ...agentSlips]
+        .filter((slip) => slip.status === "待结算" && scores.some((score: CurrentScore) => score.completed && sameMatch(slip, score))).length;
       if (matchable === 0) setSuccess(`已检查 ${before} 张待结算票，当前没有可匹配的已结束比赛。`);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "结算失败");
@@ -530,7 +590,7 @@ export default function App() {
     setError("");
     setSuccess("");
     if (item === "真实数据" && odds.length === 0) void loadLiveData();
-    if (item === "虚拟模拟" && slips.some((slip) => slip.status === "待结算")) void settleNow();
+    if (item === "虚拟模拟" && (slips.some((slip) => slip.status === "待结算") || agentSlips.some((slip) => slip.status === "待结算"))) void settleNow();
   };
 
   const chooseBet = (event: Odds, selection: Odds["selections"][number]) => {
@@ -657,6 +717,7 @@ export default function App() {
         handicap: pick.handicap,
         exactScore: pick.exactScore,
         totalGoals: pick.totalGoals,
+        settledScore: orderMatch.mode === "赛后复盘" && orderMatch.score ? orderMatch.score : undefined,
       };
     });
     const nextSlips = [...tickets, ...slips].slice(0, 120);
@@ -775,6 +836,7 @@ export default function App() {
       payout,
       experienceEarned,
       mode: "赛后复盘",
+      settledScore: { home: replayMatch.home_score, away: replayMatch.away_score },
     };
     const nextSlips = [slip, ...slips].slice(0, 100);
     const nextBalance = balance - amount + payout;
@@ -812,6 +874,42 @@ export default function App() {
     } finally {
       setAiLoading(false);
     }
+  };
+
+  const createAgentSlip = async (bet: SelectedBet, panelResult: StrategyPanel, pick?: OrderPick) => {
+    const coordinator = panelResult.coordinator;
+    if (coordinator.decision === "建议观望" || coordinator.recommended_virtual_stake <= 0) return "观望";
+    const market = pick?.market || "胜平负";
+    const pickLabel = pick?.label || selectionNames[bet.selection];
+    const duplicate = agentSlips.some((item) =>
+      item.status === "待结算" &&
+      item.eventId === bet.eventId &&
+      (item.market || "胜平负") === market &&
+      (item.pickLabel || selectionNames[item.selection]) === pickLabel,
+    );
+    if (duplicate) return "重复";
+    const stake = Math.min(MAX_STAKE, coordinator.recommended_virtual_stake, coordinator.virtual_stake_limit);
+    if (stake <= 0) return "观望";
+    const slip: AgentSlip = {
+      ...bet,
+      id: `agent-${bet.eventId}-${pick?.id || bet.selection}-${Date.now()}`,
+      stake,
+      potentialReturn: Math.round(stake * bet.odds * 100) / 100,
+      reason: coordinator.action_reason,
+      status: "待结算",
+      createdAt: new Date().toISOString(),
+      mode: "赛前模拟",
+      market,
+      pickLabel,
+      handicap: pick?.handicap,
+      exactScore: pick?.exactScore,
+      totalGoals: pick?.totalGoals,
+      agentDecision: coordinator.decision,
+    };
+    const nextAgentSlips = [slip, ...agentSlips].slice(0, 100);
+    setAgentSlips(nextAgentSlips);
+    await AsyncStorage.setItem(storageKeys.agentSlips, JSON.stringify(nextAgentSlips));
+    return "已出票";
   };
 
   const runOrderPanel = async () => {
@@ -853,7 +951,12 @@ export default function App() {
       setPanelHistory(nextHistory);
       setProfile(nextProfile);
       if (payload.coordinator.action_reason) setOrderReason(payload.coordinator.action_reason);
-      setSuccess("会审建议已加入本场下单中心，并保存到会审历史。");
+      const agentAction = orderMatch.mode === "赛前模拟" ? await createAgentSlip(bet, payload, focusPick) : "观望";
+      setSuccess(agentAction === "已出票"
+        ? "会审已保存，Agent 已按主教练建议自动建立独立模拟票。"
+        : agentAction === "重复"
+          ? "会审已保存；Agent 已持有本场同玩法待结算票，未重复出票。"
+          : "会审已保存；主教练建议观望，本次 Agent 未出票。");
       await Promise.all([
         AsyncStorage.setItem(storageKeys.panels, JSON.stringify(nextHistory)),
         AsyncStorage.setItem(storageKeys.profile, JSON.stringify(nextProfile)),
@@ -903,7 +1006,12 @@ export default function App() {
         setStake(String(payload.coordinator.recommended_virtual_stake));
         setReason(payload.coordinator.action_reason);
       }
-      setSuccess("会审已保存，获得 20 点经验和 3 点纪律分。");
+      const agentAction = await createAgentSlip(selectedBet, payload);
+      setSuccess(agentAction === "已出票"
+        ? "会审已保存，Agent 已按建议自动出票；你获得 20 点经验和 3 点纪律分。"
+        : agentAction === "重复"
+          ? "会审已保存；Agent 已持有本场同选项待结算票，未重复出票。"
+          : "会审已保存；主教练建议观望，Agent 未出票。");
       await Promise.all([
         AsyncStorage.setItem(storageKeys.panels, JSON.stringify(nextHistory)),
         AsyncStorage.setItem(storageKeys.profile, JSON.stringify(nextProfile)),
@@ -931,6 +1039,25 @@ export default function App() {
       .reduce((sum, item) => sum + (item.payout || 0) - item.stake, 0),
     [slips],
   );
+  const userSettledSlips = useMemo(
+    () => slips.filter((item) => item.mode !== "赛后复盘" && (item.status === "已命中" || item.status === "未命中")),
+    [slips],
+  );
+  const agentSettledSlips = useMemo(
+    () => agentSlips.filter((item) => item.status === "已命中" || item.status === "未命中"),
+    [agentSlips],
+  );
+  const agentRealizedProfitLoss = useMemo(
+    () => agentSettledSlips.reduce((sum, item) => sum + (item.payout || 0) - item.stake, 0),
+    [agentSettledSlips],
+  );
+  const agentPendingExposure = useMemo(
+    () => agentSlips.filter((item) => item.status === "待结算").reduce((sum, item) => sum + item.stake, 0),
+    [agentSlips],
+  );
+  const userHitRate = userSettledSlips.length ? userSettledSlips.filter((item) => item.status === "已命中").length / userSettledSlips.length * 100 : 0;
+  const agentHitRate = agentSettledSlips.length ? agentSettledSlips.filter((item) => item.status === "已命中").length / agentSettledSlips.length * 100 : 0;
+  const comparisonDifference = realizedProfitLoss - agentRealizedProfitLoss;
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -1127,10 +1254,24 @@ export default function App() {
                   <Pressable style={styles.primaryButton} onPress={submitIntegratedOrder}><Text style={styles.primaryButtonText}>确认出票 · 总投入 {orderTotalStake} 练习币</Text></Pressable>
                 </View>
 
-                <SectionTitle caption="本场已经建立的所有票据">本场票据历史</SectionTitle>
-                {slips.filter((slip) => slip.eventId === orderMatch.eventId).length === 0 ? <Text style={styles.dataMessage}>本场尚未出票。</Text> : slips.filter((slip) => slip.eventId === orderMatch.eventId).map((slip) => (
-                  <View key={slip.id} style={styles.slipCard}><View style={styles.matchMeta}><Text style={styles.matchStage}>{slip.status}</Text><Text style={styles.muted}>{zhDate(slip.createdAt)}</Text></View><Text style={styles.slipLine}>{slip.market || "胜平负"} · {slip.pickLabel || selectionNames[slip.selection]} · {slip.odds.toFixed(2)}</Text><Text style={styles.muted}>投入 {slip.stake} · 潜在返还 {slip.potentialReturn}</Text></View>
+                <SectionTitle caption="你的票与 Agent 自动票统一展示，已结算票显示国旗和最终比分">本场人机票据历史</SectionTitle>
+                {slips.filter((slip) => slip.eventId === orderMatch.eventId).map((slip) => (
+                  <View key={slip.id} style={styles.slipCard}>
+                    <View style={styles.matchMeta}><Text style={styles.matchStage}>你的票 · {slip.status}</Text><Text style={styles.muted}>{zhDate(slip.createdAt)}</Text></View>
+                    <SlipTeams slip={slip} />
+                    <Text style={styles.slipLine}>{slip.market || "胜平负"} · {slip.pickLabel || selectionNames[slip.selection]} · {slip.odds.toFixed(2)}</Text>
+                    <Text style={styles.muted}>投入 {slip.stake} · 潜在返还 {slip.potentialReturn}</Text>
+                  </View>
                 ))}
+                {agentSlips.filter((slip) => slip.eventId === orderMatch.eventId).map((slip) => (
+                  <View key={slip.id} style={styles.agentSlipCard}>
+                    <View style={styles.matchMeta}><Text style={styles.agentTicketBadge}>Agent 自动票 · {slip.status}</Text><Text style={styles.muted}>{zhDate(slip.createdAt)}</Text></View>
+                    <SlipTeams slip={slip} />
+                    <Text style={styles.slipLine}>{slip.market || "胜平负"} · {slip.pickLabel || selectionNames[slip.selection]} · {slip.odds.toFixed(2)}</Text>
+                    <Text style={styles.muted}>主教练裁决：{slip.agentDecision} · 投入 {slip.stake} · 潜在返还 {slip.potentialReturn}</Text>
+                  </View>
+                ))}
+                {slips.filter((slip) => slip.eventId === orderMatch.eventId).length === 0 && agentSlips.filter((slip) => slip.eventId === orderMatch.eventId).length === 0 ? <Text style={styles.dataMessage}>本场尚未出票。</Text> : null}
               </>
             ) : <Text style={styles.dataMessage}>请先从真实数据页面进入一场比赛的下单中心。</Text>}
           </>
@@ -1146,6 +1287,16 @@ export default function App() {
                 <Text style={styles.walletStat}>复盘盈亏 {replayProfitLoss >= 0 ? "+" : ""}{replayProfitLoss.toFixed(2)}</Text>
                 <Text style={styles.walletStat}>待结算敞口 {pendingExposure.toFixed(2)}</Text>
               </View>
+            </View>
+            <View style={styles.comparisonPanel}>
+              <View style={styles.matchMeta}><Text style={styles.panelTitle}>你与 Agent 的正式模拟表现</Text><Text style={styles.agentTicketBadge}>独立账本</Text></View>
+              <Text style={styles.muted}>Agent 在主教练给出“虚拟买入”或“小仓试验”时自动出票；建议观望时不出票。Agent 不占用你的练习币。</Text>
+              <View style={styles.comparisonGrid}>
+                <View style={styles.comparisonCard}><Text style={styles.comparisonLabel}>你的累计盈亏</Text><Text style={styles.comparisonValue}>{realizedProfitLoss >= 0 ? "+" : ""}{realizedProfitLoss.toFixed(2)}</Text><Text style={styles.muted}>命中率 {userHitRate.toFixed(1)}% · 已结算 {userSettledSlips.length}</Text></View>
+                <View style={styles.comparisonCard}><Text style={styles.comparisonLabel}>Agent 累计盈亏</Text><Text style={styles.comparisonValue}>{agentRealizedProfitLoss >= 0 ? "+" : ""}{agentRealizedProfitLoss.toFixed(2)}</Text><Text style={styles.muted}>命中率 {agentHitRate.toFixed(1)}% · 已结算 {agentSettledSlips.length}</Text></View>
+              </View>
+              <Text style={styles.comparisonDifference}>你相对 Agent：{comparisonDifference >= 0 ? "领先" : "落后"} {Math.abs(comparisonDifference).toFixed(2)} 练习币</Text>
+              <Text style={styles.muted}>待结算敞口：你 {pendingExposure.toFixed(2)} · Agent {agentPendingExposure.toFixed(2)}</Text>
             </View>
             <View style={styles.panel}>
               <Text style={styles.panelTitle}>随意补充练习币</Text>
@@ -1165,7 +1316,7 @@ export default function App() {
             {replayMatch ? (
               <View style={styles.replayPanel}>
                 <Text style={styles.replayBadge}>结果已知 · 模拟补购复盘票</Text>
-                <Text style={styles.panelTitle}>{zhTeam(replayMatch.home_team)} 对阵 {zhTeam(replayMatch.away_team)}</Text>
+                <View style={styles.teamsRow}><Team name={replayMatch.home_team} flag={replayMatch.home_team_flag_url} /><Text style={styles.versus}>对阵</Text><Team name={replayMatch.away_team} flag={replayMatch.away_team_flag_url} /></View>
                 <Text style={styles.matchScore}>{replayMatch.home_score} : {replayMatch.away_score}</Text>
                 <Text style={styles.muted}>请选择胜平负结果。以下为固定复盘练习赔率，不冒充比赛开始前真实赔率；本票不计入正式盈亏。</Text>
                 <View style={styles.oddsRow}>
@@ -1221,12 +1372,23 @@ export default function App() {
             {slips.length === 0 ? <Text style={styles.dataMessage}>尚未建立模拟单。</Text> : slips.map((slip) => (
               <View key={slip.id} style={styles.slipCard}>
                 <View style={styles.matchMeta}><Text style={styles.matchStage}>{slip.status}</Text><Text style={styles.muted}>{zhDate(slip.createdAt)}</Text></View>
-                <Text style={styles.panelTitle}>{zhTeam(slip.homeTeam)} 对阵 {zhTeam(slip.awayTeam)}</Text>
-                <Text style={styles.slipLine}>选择：{selectionNames[slip.selection]} · 固定赔率：{slip.odds.toFixed(2)}</Text>
+                <SlipTeams slip={slip} />
+                <Text style={styles.slipLine}>选择：{slip.market || "胜平负"} · {slip.pickLabel || selectionNames[slip.selection]} · 固定赔率：{slip.odds.toFixed(2)}</Text>
                 <Text style={styles.slipLine}>投入：{slip.stake} · 潜在返还：{slip.potentialReturn}</Text>
                 <Text style={styles.muted}>理由：{slip.reason}</Text>
                 <Text style={styles.muted}>票种：{slip.mode || "赛前模拟"} · 票号：{slip.id}</Text>
                 {slip.payout !== undefined ? <Text style={styles.slipLine}>实际返还：{slip.payout} · 获得经验：{slip.experienceEarned}</Text> : <Text style={styles.muted}>建单经验：{slip.experienceEarned || 0}</Text>}
+              </View>
+            ))}
+            <SectionTitle caption="由主教练裁决自动建立，独立于你的练习币余额">Agent 自动模拟单历史</SectionTitle>
+            {agentSlips.length === 0 ? <Text style={styles.dataMessage}>尚无 Agent 自动票。启动一次真实多角色会审后，Agent 会按最终裁决决定出票或观望。</Text> : agentSlips.map((slip) => (
+              <View key={slip.id} style={styles.agentSlipCard}>
+                <View style={styles.matchMeta}><Text style={styles.agentTicketBadge}>Agent 自动票 · {slip.status}</Text><Text style={styles.muted}>{zhDate(slip.createdAt)}</Text></View>
+                <SlipTeams slip={slip} />
+                <Text style={styles.slipLine}>{slip.market || "胜平负"} · {slip.pickLabel || selectionNames[slip.selection]} · 赔率 {slip.odds.toFixed(2)}</Text>
+                <Text style={styles.slipLine}>裁决：{slip.agentDecision} · 投入 {slip.stake} · 潜在返还 {slip.potentialReturn}</Text>
+                <Text style={styles.muted}>理由：{slip.reason}</Text>
+                {slip.payout !== undefined ? <Text style={styles.slipLine}>实际返还：{slip.payout} · 本票盈亏：{((slip.payout || 0) - slip.stake).toFixed(2)}</Text> : <Text style={styles.muted}>等待真实赛果结算</Text>}
               </View>
             ))}
           </>
@@ -1234,7 +1396,7 @@ export default function App() {
 
         {page === "多角色分析" ? (
           <>
-            <SectionTitle caption="三个不同人格独立调用人工智能模型，最后由主教练汇总">多角色策略会审</SectionTitle>
+            <SectionTitle caption="三个不同人格独立分析，主教练汇总后自动决定 Agent 出票或观望">多角色策略会审</SectionTitle>
             {selectedBet ? (
               <View style={styles.panel}>
                 <Text style={styles.panelTitle}>{zhTeam(selectedBet.homeTeam)} 对阵 {zhTeam(selectedBet.awayTeam)}</Text>
@@ -1263,6 +1425,7 @@ export default function App() {
                 <Text style={styles.learningLabel}>核心分歧</Text><Text style={styles.learningSummary}>{panel.coordinator.disagreements}</Text>
                 <Text style={styles.learningLabel}>建议投入 / 仓位上限</Text><Text style={styles.coordinatorLimit}>{panel.coordinator.recommended_virtual_stake} / {panel.coordinator.virtual_stake_limit} 练习币</Text>
                 <Text style={styles.exercise}>复盘问题：{panel.coordinator.review_question}</Text>
+                <Text style={styles.exercise}>{panel.coordinator.decision === "建议观望" ? "Agent 执行结果：本次观望，不出票。" : "Agent 执行结果：会审完成后自动建立独立模拟票。"}</Text>
                 {panel.coordinator.recommended_virtual_stake > 0 ? (
                   <Pressable style={styles.lightButton} onPress={() => {
                     setStake(String(panel.coordinator.recommended_virtual_stake));
@@ -1272,6 +1435,12 @@ export default function App() {
                 ) : <Text style={styles.warning}>本次明确建议观望，不出票。会审历史和经验仍会保留。</Text>}
               </View>
             ) : null}
+            <View style={styles.comparisonPanel}>
+              <Text style={styles.panelTitle}>人机模拟表现对比</Text>
+              <Text style={styles.slipLine}>你：盈亏 {realizedProfitLoss >= 0 ? "+" : ""}{realizedProfitLoss.toFixed(2)} · 命中率 {userHitRate.toFixed(1)}% · 已结算 {userSettledSlips.length}</Text>
+              <Text style={styles.slipLine}>Agent：盈亏 {agentRealizedProfitLoss >= 0 ? "+" : ""}{agentRealizedProfitLoss.toFixed(2)} · 命中率 {agentHitRate.toFixed(1)}% · 已结算 {agentSettledSlips.length}</Text>
+              <Text style={styles.comparisonDifference}>你相对 Agent：{comparisonDifference >= 0 ? "领先" : "落后"} {Math.abs(comparisonDifference).toFixed(2)} 练习币</Text>
+            </View>
             <SectionTitle caption="永久保存在当前设备，可重新查看角色观点和最终建议">会审历史</SectionTitle>
             {panelHistory.length === 0 ? <Text style={styles.dataMessage}>尚无会审历史。</Text> : panelHistory.map((item) => (
               <Pressable key={item.id} style={styles.historyCard} onPress={() => { setSelectedBet(item.bet); setPanel(item.panel); }}>
@@ -1454,7 +1623,15 @@ const styles = StyleSheet.create({
   selectionTitle: { color: "#173e37", fontWeight: "900" },
   selectionOdds: { color: "#0d685a", fontWeight: "900" },
   slipCard: { backgroundColor: "#fffdf8", borderLeftWidth: 5, borderLeftColor: "#0d7565", borderRadius: 14, padding: 16, gap: 7 },
+  agentSlipCard: { backgroundColor: "#edf5ff", borderLeftWidth: 5, borderLeftColor: "#315f9b", borderRadius: 14, padding: 16, gap: 9 },
+  agentTicketBadge: { color: "#244d83", backgroundColor: "#dceaff", borderRadius: 99, paddingHorizontal: 9, paddingVertical: 5, fontWeight: "900", fontSize: 11 },
   slipLine: { color: "#173e37", fontWeight: "800" },
+  comparisonPanel: { backgroundColor: "#fffdf8", borderWidth: 2, borderColor: "#315f9b", borderRadius: 20, padding: 18, gap: 12 },
+  comparisonGrid: { flexDirection: "row", gap: 9 },
+  comparisonCard: { flex: 1, backgroundColor: "#edf5ff", borderRadius: 14, padding: 13, gap: 5 },
+  comparisonLabel: { color: "#36516e", fontSize: 11, fontWeight: "800" },
+  comparisonValue: { color: "#173e37", fontSize: 22, fontWeight: "900" },
+  comparisonDifference: { color: "#244d83", fontSize: 15, fontWeight: "900" },
   agentCard: { backgroundColor: "#fffdf8", borderWidth: 1, borderColor: "#dedbd1", borderRadius: 18, padding: 17, gap: 9 },
   agentName: { color: "#0d685a", fontWeight: "900", fontSize: 16 },
   confidence: { color: "#815b0c", backgroundColor: "#f7e8c8", borderRadius: 99, paddingHorizontal: 9, paddingVertical: 5, fontWeight: "800", fontSize: 11 },
