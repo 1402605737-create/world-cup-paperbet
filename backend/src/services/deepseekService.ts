@@ -189,8 +189,8 @@ export async function generateStrategyPanel(input: StrategyPanelInput): Promise<
   );
 
   const coordinator = await callDeepSeekJson(
-    "你是世界杯纸上竞猜的主教练·裁决官。你不迎合任何一方，只汇总分歧、控制风险，并给出明确的虚拟模拟行动。只讨论虚拟练习币，不提供真实资金建议，不承诺结果。只输出合法 JSON，所有自然语言必须为简体中文。",
-    `赔率快照：${inputJson}。三个独立角色意见：${JSON.stringify(agents)}。请返回：{"decision":"虚拟买入、小仓试验或建议观望","summary":"综合裁决","disagreements":"角色之间最重要的分歧","virtual_stake_limit":0到500的整数,"recommended_virtual_stake":0到200的整数，建议观望时必须为0,"action_reason":"为什么采取该行动","entry_condition":"执行该虚拟行动前需要满足的条件，观望时说明重新评估条件","review_question":"赛后复盘问题"}。`,
+    "你是世界杯纸上竞猜的主教练·裁决官。你不迎合任何一方，只汇总分歧、控制风险，并给出明确且有区分度的虚拟模拟行动。不得仅因为比赛存在不确定性就机械选择建议观望；必须比较证据强弱、赔率隐含概率和角色置信度，在虚拟买入、小仓试验、建议观望之间择一。只讨论虚拟练习币，不提供真实资金建议，不承诺结果。只输出合法 JSON，所有自然语言必须为简体中文。",
+    `赔率快照：${inputJson}。三个独立角色意见：${JSON.stringify(agents)}。裁决规则：证据明显支持当前选择时可虚拟买入；证据有优势但分歧仍大时应小仓试验；只有证据不足、赔率明显不合理或风险无法描述时才建议观望。请返回：{"decision":"虚拟买入、小仓试验或建议观望","summary":"综合裁决","disagreements":"角色之间最重要的分歧","virtual_stake_limit":0到500的整数,"recommended_virtual_stake":0到200的整数，建议观望时必须为0,"action_reason":"为什么采取该行动","entry_condition":"执行该虚拟行动前需要满足的条件，观望时说明重新评估条件","review_question":"赛后复盘问题"}。`,
     panelDecisionSchema,
   );
 
