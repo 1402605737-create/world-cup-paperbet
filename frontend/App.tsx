@@ -17,9 +17,17 @@ const INITIAL_BALANCE = 10_000;
 const MAX_STAKE = 500;
 const AGENT_EXPLORATION_STAKE = 2;
 
-type Page = "首页" | "真实数据" | "比赛下单" | "虚拟模拟" | "多角色分析" | "学习助手" | "系统状态" | "使用说明";
+type Page = "首页" | "真实数据" | "比赛下单" | "虚拟模拟" | "Agent 实验室" | "多角色分析" | "学习助手" | "系统状态" | "使用说明";
 type Selection = "home" | "draw" | "away";
 type OrderWindow = "切换比赛" | "选择玩法" | "下单汇总" | "本场票据";
+type HomeWindow = "赛季概览" | "核心流程";
+type DataWindow = "2026 赔率" | "2026 比分" | "2022 复盘";
+type SimulationWindow = "人机概览" | "建立模拟" | "我的票据" | "Agent 票据";
+type AgentWindow = "总览" | "待结算持仓" | "已结算记录";
+type AnalysisWindow = "当前会审" | "人机对比" | "会审历史";
+type LearningWindow = "开始学习" | "学习结果" | "学习历史";
+type SystemWindow = "核心服务" | "数据源状态";
+type GuideWindow = "操作步骤" | "数据与合规";
 type OrderDateFilter = "全部" | "今天" | "明天" | "近3天" | "已结束";
 type OrderMarketWindow = "胜平负" | "让球" | "猜比分" | "总进球";
 
@@ -349,6 +357,18 @@ function SectionTitle({ children, caption }: { children: string; caption?: strin
   );
 }
 
+function WindowTabs<T extends string>({ value, items, onChange }: { value: T; items: Array<[T, string]>; onChange: (value: T) => void }) {
+  return (
+    <View style={styles.windowTabs}>
+      {items.map(([itemValue, label]) => (
+        <Pressable key={itemValue} onPress={() => onChange(itemValue)} style={[styles.windowTab, value === itemValue && styles.windowTabActive]}>
+          <Text style={[styles.windowTabText, value === itemValue && styles.windowTabTextActive]}>{label}</Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
 function StatusRow({ title, configured, detail }: { title: string; configured: boolean; detail: string }) {
   return (
     <View style={styles.statusRow}>
@@ -424,6 +444,14 @@ export default function App() {
   const [orderDateFilter, setOrderDateFilter] = useState<OrderDateFilter>("全部");
   const [orderMarketWindow, setOrderMarketWindow] = useState<OrderMarketWindow>("胜平负");
   const [agentSlips, setAgentSlips] = useState<AgentSlip[]>([]);
+  const [homeWindow, setHomeWindow] = useState<HomeWindow>("赛季概览");
+  const [dataWindow, setDataWindow] = useState<DataWindow>("2026 赔率");
+  const [simulationWindow, setSimulationWindow] = useState<SimulationWindow>("人机概览");
+  const [agentWindow, setAgentWindow] = useState<AgentWindow>("总览");
+  const [analysisWindow, setAnalysisWindow] = useState<AnalysisWindow>("当前会审");
+  const [learningWindow, setLearningWindow] = useState<LearningWindow>("开始学习");
+  const [systemWindow, setSystemWindow] = useState<SystemWindow>("核心服务");
+  const [guideWindow, setGuideWindow] = useState<GuideWindow>("操作步骤");
 
   const stakeNumber = Number(stake) || 0;
   const potentialReturn = selectedBet ? Math.round(stakeNumber * selectedBet.odds * 100) / 100 : 0;
@@ -884,6 +912,7 @@ export default function App() {
       if (!response.ok) throw new Error(payload.error || "学习内容生成失败");
       const nextHistory = [payload, ...learningHistory].slice(0, 20);
       setLearning(payload);
+      setLearningWindow("学习结果");
       setLearningHistory(nextHistory);
       await AsyncStorage.setItem(storageKeys.learning, JSON.stringify(nextHistory));
     } catch (requestError) {
@@ -1152,7 +1181,7 @@ export default function App() {
         </View>
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.nav}>
-          {(["首页", "真实数据", ...(orderMatch ? ["比赛下单" as Page] : []), "虚拟模拟", "多角色分析", "学习助手", "系统状态", "使用说明"] as Page[]).map((item) => (
+          {(["首页", "真实数据", ...(orderMatch ? ["比赛下单" as Page] : []), "虚拟模拟", "Agent 实验室", "多角色分析", "学习助手", "系统状态", "使用说明"] as Page[]).map((item) => (
             <Pressable key={item} onPress={() => openPage(item)} style={[styles.navItem, page === item && styles.navItemActive]}>
               <Text style={[styles.navText, page === item && styles.navTextActive]}>{item}</Text>
             </Pressable>
@@ -1164,6 +1193,8 @@ export default function App() {
 
         {page === "首页" ? (
           <>
+            <WindowTabs value={homeWindow} onChange={setHomeWindow} items={[["赛季概览", "赛季概览"], ["核心流程", "核心流程"]]} />
+            {homeWindow === "赛季概览" ? (
             <View style={styles.hero}>
               <Text style={styles.heroLabel}>第 {profile.season} 练习赛季 · 等级 {level}</Text>
               <Text style={styles.heroBalance}>{balance.toLocaleString("zh-CN")} 练习币</Text>
@@ -1172,6 +1203,9 @@ export default function App() {
               <Text style={styles.heroText}>距离下一等级还需 {100 - levelProgress} 点经验。会审、建单和真实赛果结算都会积累经验。</Text>
               <Pressable style={styles.lightButton} onPress={() => openPage("真实数据")}><Text style={styles.lightButtonText}>从真实赔率开始模拟</Text></Pressable>
             </View>
+            ) : null}
+            {homeWindow === "核心流程" ? (
+            <>
             <SectionTitle caption="从选择、质疑到复盘，形成完整学习闭环">核心流程</SectionTitle>
             {[
               ["01", "选择 2026 真实赔率", "查看 2026 世界杯真实赛程赔率与球队国旗，选择主胜、平局或客胜。", "真实数据"],
@@ -1183,6 +1217,8 @@ export default function App() {
                 <Text style={styles.featureNumber}>{number}</Text><Text style={styles.featureTitle}>{title}</Text><Text style={styles.muted}>{text}</Text>
               </Pressable>
             ))}
+            </>
+            ) : null}
           </>
         ) : null}
 
@@ -1191,12 +1227,15 @@ export default function App() {
             <SectionTitle caption="当前主要体验为 2026 世界杯；2022 数据只用于历史复盘">2026 世界杯真实数据中心</SectionTitle>
             <Pressable style={styles.primaryButton} onPress={loadLiveData} disabled={liveDataLoading}><Text style={styles.primaryButtonText}>{liveDataLoading ? "正在刷新…" : "刷新真实数据"}</Text></Pressable>
             {liveDataLoading ? <ActivityIndicator color="#0d685a" size="large" /> : null}
+            <WindowTabs value={dataWindow} onChange={setDataWindow} items={[["2026 赔率", `2026 赔率 ${odds.length}`], ["2026 比分", `2026 比分 ${currentScores.length}`], ["2022 复盘", `2022 复盘 ${matches.length}`]]} />
             <View style={styles.notice}>
               <Text style={styles.noticeTitle}>当前赛事：2026 世界杯</Text>
               <Text style={styles.noticeText}>页面优先展示 2026 世界杯当前真实赔率、未来赛程，以及实时/近三天比分。页面底部另保留 2022 年世界杯 64 场完整赛果，仅用于已结束比赛复盘，不代表当前届次。</Text>
             </View>
             {matchesMessage ? <Text style={styles.dataMessage}>{matchesMessage}</Text> : null}
             {oddsMessage ? <Text style={styles.dataMessage}>{oddsMessage}</Text> : null}
+            {dataWindow === "2026 赔率" ? (
+            <>
             <SectionTitle caption={`${odds.length} 场可用于虚拟模拟`}>2026 世界杯当前真实赔率</SectionTitle>
             {odds.map((item) => (
               <View key={item.external_event_id} style={styles.matchCard}>
@@ -1214,6 +1253,10 @@ export default function App() {
                 <Pressable style={styles.primaryButton} onPress={() => openOrderCenter(item)}><Text style={styles.primaryButtonText}>进入本场整合下单中心</Text></Pressable>
               </View>
             ))}
+            </>
+            ) : null}
+            {dataWindow === "2026 比分" ? (
+            <>
             <SectionTitle caption={`${currentScores.length} 场 2026 世界杯赛事；比分由数据源实时返回，近三天赛果可查询`}>2026 世界杯实时与近期比分</SectionTitle>
             {currentScores.length === 0 ? <Text style={styles.dataMessage}>当前比分接口暂未返回比赛；开赛后刷新即可查看实时与近三天赛果。</Text> : currentScores.map((match) => (
               <View key={match.external_event_id} style={styles.matchCard}>
@@ -1235,6 +1278,10 @@ export default function App() {
                 ) : null}
               </View>
             ))}
+            </>
+            ) : null}
+            {dataWindow === "2022 复盘" ? (
+            <>
             <View style={styles.archiveNotice}><Text style={styles.archiveNoticeTitle}>以下为 2022 历史复盘档案，不是当前 2026 届赛事</Text><Text style={styles.muted}>保留完整历史比分、国旗和赛后补购入口，用于训练结算与复盘。</Text></View>
             <SectionTitle caption={`${matches.length} 场真实已完赛记录，仅供历史复盘`}>2022 世界杯历史复盘档案</SectionTitle>
             {matches.map((match) => (
@@ -1256,6 +1303,8 @@ export default function App() {
                 ) : null}
               </View>
             ))}
+            </>
+            ) : null}
           </>
         ) : null}
 
@@ -1436,6 +1485,14 @@ export default function App() {
         {page === "虚拟模拟" ? (
           <>
             <SectionTitle caption="1 练习币即可开始；快捷档位降低体验门槛；历史和经验永久保留">虚拟模拟单</SectionTitle>
+            <WindowTabs value={simulationWindow} onChange={setSimulationWindow} items={[
+              ["人机概览", "人机概览"],
+              ["建立模拟", "建立模拟"],
+              ["我的票据", `我的票据 ${slips.length}`],
+              ["Agent 票据", `Agent 票据 ${agentSlips.length}`],
+            ]} />
+            {simulationWindow === "人机概览" ? (
+            <>
             <View style={styles.walletRow}>
               <View><Text style={styles.smallLabel}>可用练习币</Text><Text style={styles.walletValue}>{balance.toLocaleString("zh-CN")}</Text><Text style={styles.walletMeta}>累计补充 {profile.totalGranted.toLocaleString("zh-CN")} · 补币不计盈亏</Text></View>
               <View style={styles.walletStats}>
@@ -1468,7 +1525,11 @@ export default function App() {
             <Pressable style={styles.primaryButton} onPress={settleNow} disabled={liveDataLoading}>
               <Text style={styles.primaryButtonText}>{liveDataLoading ? "正在核对真实赛果…" : "立即结算所有已结束比赛"}</Text>
             </Pressable>
+            </>
+            ) : null}
 
+            {simulationWindow === "建立模拟" ? (
+            <>
             {replayMatch ? (
               <View style={styles.replayPanel}>
                 <Text style={styles.replayBadge}>结果已知 · 模拟补购复盘票</Text>
@@ -1524,6 +1585,10 @@ export default function App() {
                 <Pressable style={styles.secondaryButton} onPress={() => setPage("多角色分析")}><Text style={styles.secondaryButtonText}>先让多角色会审</Text></Pressable>
               </View>
             ) : <Text style={styles.dataMessage}>请先到“真实数据”页面选择一个真实赔率。</Text>}
+            </>
+            ) : null}
+            {simulationWindow === "我的票据" ? (
+            <>
             <SectionTitle caption="保存在当前设备，可用于赛后复盘">模拟单历史</SectionTitle>
             {slips.length === 0 ? <Text style={styles.dataMessage}>尚未建立模拟单。</Text> : slips.map((slip) => (
               <View key={slip.id} style={styles.slipCard}>
@@ -1536,6 +1601,10 @@ export default function App() {
                 {slip.payout !== undefined ? <Text style={styles.slipLine}>实际返还：{slip.payout} · 获得经验：{slip.experienceEarned}</Text> : <Text style={styles.muted}>建单经验：{slip.experienceEarned || 0}</Text>}
               </View>
             ))}
+            </>
+            ) : null}
+            {simulationWindow === "Agent 票据" ? (
+            <>
             <SectionTitle caption={`主教练建议执行时按建议仓位出票；建议观望时用 ${AGENT_EXPLORATION_STAKE} 币最低探索仓出票`}>Agent 自动模拟单历史</SectionTitle>
             {agentSlips.length === 0 ? <Text style={styles.dataMessage}>尚无 Agent 自动票。启动一次真实多角色会审后，Agent 会按建议仓位或最低探索仓自动出票。</Text> : agentSlips.map((slip) => (
               <View key={slip.id} style={styles.agentSlipCard}>
@@ -1547,12 +1616,79 @@ export default function App() {
                 {slip.payout !== undefined ? <Text style={styles.slipLine}>实际返还：{slip.payout} · 本票盈亏：{((slip.payout || 0) - slip.stake).toFixed(2)}</Text> : <Text style={styles.muted}>等待真实赛果结算</Text>}
               </View>
             ))}
+            </>
+            ) : null}
+          </>
+        ) : null}
+
+        {page === "Agent 实验室" ? (
+          <>
+            <SectionTitle caption="Agent 的自动购入、持仓、结算与盈亏全部集中展示">Agent 自动模拟实验室</SectionTitle>
+            <WindowTabs value={agentWindow} onChange={setAgentWindow} items={[
+              ["总览", "Agent 总览"],
+              ["待结算持仓", `待结算 ${agentSlips.filter((item) => item.status === "待结算").length}`],
+              ["已结算记录", `已结算 ${agentSettledSlips.length}`],
+            ]} />
+            {agentWindow === "总览" ? (
+              <>
+                <View style={styles.agentLabHero}>
+                  <View style={styles.matchMeta}><Text style={styles.agentLabTitle}>自动购入规则</Text><Text style={styles.agentTicketBadge}>独立虚拟账本</Text></View>
+                  <Text style={styles.agentLabRule}>主教练建议“虚拟买入 / 小仓试验”：Agent 按建议仓位自动购入。</Text>
+                  <Text style={styles.agentLabRule}>主教练建议“观望”：Agent 仍使用 {AGENT_EXPLORATION_STAKE} 练习币最低探索仓自动购入，用真实赛果验证观望判断。</Text>
+                  <Text style={styles.muted}>Agent 票不会占用你的练习币，也不会混入你的盈亏。</Text>
+                </View>
+                <View style={styles.comparisonPanel}>
+                  <Text style={styles.panelTitle}>Agent 当前表现</Text>
+                  <View style={styles.comparisonGrid}>
+                    <View style={styles.comparisonCard}><Text style={styles.comparisonLabel}>累计盈亏</Text><Text style={styles.comparisonValue}>{agentRealizedProfitLoss >= 0 ? "+" : ""}{agentRealizedProfitLoss.toFixed(2)}</Text><Text style={styles.muted}>命中率 {agentHitRate.toFixed(1)}%</Text></View>
+                    <View style={styles.comparisonCard}><Text style={styles.comparisonLabel}>自动购入总数</Text><Text style={styles.comparisonValue}>{agentSlips.length}</Text><Text style={styles.muted}>待结算 {agentSlips.filter((item) => item.status === "待结算").length}</Text></View>
+                  </View>
+                  <Text style={styles.slipLine}>观望探索票：{agentSlips.filter((item) => item.agentExecution === "观望探索").length} · 按建议执行票：{agentSlips.filter((item) => item.agentExecution !== "观望探索").length}</Text>
+                  <Text style={styles.comparisonDifference}>你相对 Agent：{comparisonDifference >= 0 ? "领先" : "落后"} {Math.abs(comparisonDifference).toFixed(2)} 练习币</Text>
+                </View>
+                <Pressable style={styles.primaryButton} onPress={() => setPage("多角色分析")}><Text style={styles.primaryButtonText}>启动会审，让 Agent 自动购入</Text></Pressable>
+                <Pressable style={styles.secondaryButton} onPress={settleNow} disabled={liveDataLoading}><Text style={styles.secondaryButtonText}>{liveDataLoading ? "正在核对真实赛果…" : "立即结算 Agent 已结束比赛"}</Text></Pressable>
+              </>
+            ) : null}
+            {agentWindow === "待结算持仓" ? (
+              <>
+                {agentSlips.filter((item) => item.status === "待结算").length === 0 ? <Text style={styles.dataMessage}>当前没有待结算 Agent 持仓。进入多角色分析完成会审后，Agent 会自动购入。</Text> : agentSlips.filter((item) => item.status === "待结算").map((slip) => (
+                  <View key={slip.id} style={styles.agentSlipCard}>
+                    <View style={styles.matchMeta}><Text style={styles.agentTicketBadge}>Agent 持仓 · 待结算</Text><Text style={styles.muted}>{zhDate(slip.createdAt)}</Text></View>
+                    <SlipTeams slip={slip} />
+                    <Text style={styles.slipLine}>{slip.market || "胜平负"} · {slip.pickLabel || selectionNames[slip.selection]} · 赔率 {slip.odds.toFixed(2)}</Text>
+                    <Text style={styles.slipLine}>执行：{slip.agentExecution || "按建议执行"} · 投入 {slip.stake} · 潜在返还 {slip.potentialReturn}</Text>
+                    <Text style={styles.muted}>裁决：{slip.agentDecision} · {slip.reason}</Text>
+                  </View>
+                ))}
+              </>
+            ) : null}
+            {agentWindow === "已结算记录" ? (
+              <>
+                {agentSettledSlips.length === 0 ? <Text style={styles.dataMessage}>尚无已结算 Agent 记录。</Text> : agentSettledSlips.map((slip) => (
+                  <View key={slip.id} style={styles.agentSlipCard}>
+                    <View style={styles.matchMeta}><Text style={styles.agentTicketBadge}>Agent 记录 · {slip.status}</Text><Text style={styles.muted}>{slip.settledAt ? zhDate(slip.settledAt) : zhDate(slip.createdAt)}</Text></View>
+                    <SlipTeams slip={slip} />
+                    <Text style={styles.slipLine}>{slip.market || "胜平负"} · {slip.pickLabel || selectionNames[slip.selection]} · 投入 {slip.stake}</Text>
+                    <Text style={styles.slipLine}>实际返还 {slip.payout || 0} · 本票盈亏 {((slip.payout || 0) - slip.stake).toFixed(2)}</Text>
+                    <Text style={styles.muted}>执行：{slip.agentExecution || "按建议执行"} · 裁决：{slip.agentDecision}</Text>
+                  </View>
+                ))}
+              </>
+            ) : null}
           </>
         ) : null}
 
         {page === "多角色分析" ? (
           <>
             <SectionTitle caption="三个不同人格独立分析，主教练汇总后自动决定 Agent 出票或观望">多角色策略会审</SectionTitle>
+            <WindowTabs value={analysisWindow} onChange={setAnalysisWindow} items={[
+              ["当前会审", "当前会审"],
+              ["人机对比", "人机对比"],
+              ["会审历史", `会审历史 ${panelHistory.length}`],
+            ]} />
+            {analysisWindow === "当前会审" ? (
+            <>
             {selectedBet ? (
               <View style={styles.panel}>
                 <Text style={styles.panelTitle}>{zhTeam(selectedBet.homeTeam)} 对阵 {zhTeam(selectedBet.awayTeam)}</Text>
@@ -1591,26 +1727,40 @@ export default function App() {
                 ) : <Text style={styles.warning}>本次主教练明确建议观望，因此不会建议你出票；Agent 会独立使用最低探索仓验证该判断。</Text>}
               </View>
             ) : null}
+            </>
+            ) : null}
+            {analysisWindow === "人机对比" ? (
             <View style={styles.comparisonPanel}>
               <Text style={styles.panelTitle}>人机模拟表现对比</Text>
               <Text style={styles.slipLine}>你：盈亏 {realizedProfitLoss >= 0 ? "+" : ""}{realizedProfitLoss.toFixed(2)} · 命中率 {userHitRate.toFixed(1)}% · 已结算 {userSettledSlips.length}</Text>
               <Text style={styles.slipLine}>Agent：盈亏 {agentRealizedProfitLoss >= 0 ? "+" : ""}{agentRealizedProfitLoss.toFixed(2)} · 命中率 {agentHitRate.toFixed(1)}% · 已结算 {agentSettledSlips.length}</Text>
               <Text style={styles.comparisonDifference}>你相对 Agent：{comparisonDifference >= 0 ? "领先" : "落后"} {Math.abs(comparisonDifference).toFixed(2)} 练习币</Text>
             </View>
+            ) : null}
+            {analysisWindow === "会审历史" ? (
+            <>
             <SectionTitle caption="永久保存在当前设备，可重新查看角色观点和最终建议">会审历史</SectionTitle>
             {panelHistory.length === 0 ? <Text style={styles.dataMessage}>尚无会审历史。</Text> : panelHistory.map((item) => (
-              <Pressable key={item.id} style={styles.historyCard} onPress={() => { setSelectedBet(item.bet); setPanel(item.panel); }}>
+              <Pressable key={item.id} style={styles.historyCard} onPress={() => { setSelectedBet(item.bet); setPanel(item.panel); setAnalysisWindow("当前会审"); }}>
                 <View style={styles.matchMeta}><Text style={styles.panelTitle}>{zhTeam(item.bet.homeTeam)} 对阵 {zhTeam(item.bet.awayTeam)}</Text><Text style={styles.muted}>{zhDate(item.createdAt)}</Text></View>
                 <Text style={styles.slipLine}>{selectionNames[item.bet.selection]} · 赔率 {item.bet.odds.toFixed(2)} · {item.panel.coordinator.decision}</Text>
                 <Text numberOfLines={2} style={styles.muted}>{item.panel.coordinator.action_reason}</Text>
               </Pressable>
             ))}
+            </>
+            ) : null}
           </>
         ) : null}
 
         {page === "学习助手" ? (
           <>
             <SectionTitle caption="真实人工智能生成讲解、练习与参考答案">中文学习助手</SectionTitle>
+            <WindowTabs value={learningWindow} onChange={setLearningWindow} items={[
+              ["开始学习", "开始学习"],
+              ["学习结果", "学习结果"],
+              ["学习历史", `学习历史 ${learningHistory.length}`],
+            ]} />
+            {learningWindow === "开始学习" ? (
             <View style={styles.panel}>
               <Text style={styles.inputLabel}>你今天想学习什么？</Text>
               <View style={styles.topicList}>{topics.map((item) => (
@@ -1619,24 +1769,38 @@ export default function App() {
               <TextInput value={topic} onChangeText={setTopic} multiline style={styles.input} />
               <Pressable style={styles.primaryButton} onPress={generateLearningGuide} disabled={aiLoading}><Text style={styles.primaryButtonText}>{aiLoading ? "正在生成…" : "生成学习讲解"}</Text></Pressable>
             </View>
+            ) : null}
             {aiLoading ? <ActivityIndicator color="#0d685a" size="large" /> : null}
-            {learning ? <LearningCard result={learning} /> : null}
+            {learningWindow === "学习结果" ? (learning ? <LearningCard result={learning} /> : <Text style={styles.dataMessage}>尚无学习结果，请先在“开始学习”窗口生成讲解。</Text>) : null}
+            {learningWindow === "学习历史" ? (
+            <>
             <SectionTitle caption="保存在当前设备，最多 20 条">学习历史</SectionTitle>
             {learningHistory.length === 0 ? <Text style={styles.dataMessage}>尚无学习历史。</Text> : learningHistory.map((item, index) => (
-              <Pressable key={`${item.topic}-${index}`} style={styles.historyCard} onPress={() => setLearning(item)}><Text style={styles.panelTitle}>{item.topic}</Text><Text numberOfLines={2} style={styles.muted}>{item.summary}</Text></Pressable>
+              <Pressable key={`${item.topic}-${index}`} style={styles.historyCard} onPress={() => { setLearning(item); setLearningWindow("学习结果"); }}><Text style={styles.panelTitle}>{item.topic}</Text><Text numberOfLines={2} style={styles.muted}>{item.summary}</Text></Pressable>
             ))}
+            </>
+            ) : null}
           </>
         ) : null}
 
         {page === "系统状态" ? (
           <>
             <SectionTitle caption="只展示真实配置结果">系统状态</SectionTitle>
+            <WindowTabs value={systemWindow} onChange={setSystemWindow} items={[["核心服务", "核心服务"], ["数据源状态", "数据源状态"]]} />
             {loading ? <ActivityIndicator color="#0d685a" size="large" /> : null}
             {config && health ? <View style={styles.panel}>
+              {systemWindow === "核心服务" ? (
+              <>
               <StatusRow title="数据库服务" configured={health.database_connected} detail={`已记录 ${health.case_count} 条验证与人工智能调用数据`} />
               <StatusRow title="人工智能服务" configured={health.deepseek_configured} detail="用于学习助手与多角色策略会审" />
+              </>
+              ) : null}
+              {systemWindow === "数据源状态" ? (
+              <>
               <StatusRow title="真实赛程与赛果" configured={config.sports_data.configured} detail={config.sports_data.message} />
               <StatusRow title="真实胜平负赔率" configured={config.odds_data.configured} detail={config.odds_data.message} />
+              </>
+              ) : null}
             </View> : null}
           </>
         ) : null}
@@ -1644,6 +1808,8 @@ export default function App() {
         {page === "使用说明" ? (
           <>
             <SectionTitle caption="当前版本已具备真实数据到虚拟复盘的完整路径">使用说明</SectionTitle>
+            <WindowTabs value={guideWindow} onChange={setGuideWindow} items={[["操作步骤", "操作步骤"], ["数据与合规", "数据与合规"]]} />
+            {guideWindow === "操作步骤" ? (
             <View style={styles.panel}>
               {[
                 ["第一步", "打开真实数据，选择一场 2026 世界杯比赛的真实胜平负赔率。"],
@@ -1653,7 +1819,10 @@ export default function App() {
                 ["第五步", "使用学习助手完成练习，并对照参考答案。"],
               ].map(([step, text]) => <View key={step} style={styles.guideRow}><Text style={styles.guideStep}>{step}</Text><Text style={styles.guideText}>{text}</Text></View>)}
             </View>
+            ) : null}
+            {guideWindow === "数据与合规" ? (
             <View style={styles.notice}><Text style={styles.noticeTitle}>数据边界与合规边界</Text><Text style={styles.noticeText}>当前主赛事为 2026 世界杯，包含当前赔率、未来赛程与实时/近期比分。2022 完整赛果仅作为历史复盘档案。更早四届仍需新增具备相应权限的数据源。产品只使用虚拟练习币，不提供充值、提现、支付或真实投注。</Text></View>
+            ) : null}
           </>
         ) : null}
 
@@ -1800,6 +1969,9 @@ const styles = StyleSheet.create({
   slipCard: { backgroundColor: "#fffdf8", borderLeftWidth: 5, borderLeftColor: "#0d7565", borderRadius: 14, padding: 16, gap: 7 },
   agentSlipCard: { backgroundColor: "#edf5ff", borderLeftWidth: 5, borderLeftColor: "#315f9b", borderRadius: 14, padding: 16, gap: 9 },
   agentTicketBadge: { color: "#244d83", backgroundColor: "#dceaff", borderRadius: 99, paddingHorizontal: 9, paddingVertical: 5, fontWeight: "900", fontSize: 11 },
+  agentLabHero: { backgroundColor: "#173e37", borderRadius: 22, padding: 20, gap: 10 },
+  agentLabTitle: { color: "#ffffff", fontSize: 20, fontWeight: "900" },
+  agentLabRule: { color: "#d8e7e3", fontSize: 13, lineHeight: 21, fontWeight: "700" },
   slipLine: { color: "#173e37", fontWeight: "800" },
   comparisonPanel: { backgroundColor: "#fffdf8", borderWidth: 2, borderColor: "#315f9b", borderRadius: 20, padding: 18, gap: 12 },
   comparisonGrid: { flexDirection: "row", gap: 9 },
