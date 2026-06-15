@@ -158,6 +158,14 @@ type PracticeSlip = SelectedBet & {
 type AgentSlip = PracticeSlip & {
   agentDecision: "虚拟买入" | "小仓试验" | "建议观望";
   agentExecution: "按建议执行" | "观望探索";
+  agentBaseStake?: number;
+  agentMultiplier?: number;
+};
+
+type AgentSettings = {
+  autoBuyEnabled: boolean;
+  multiplier: number;
+  maxStake: number;
 };
 
 type AgentOpinion = {
@@ -240,6 +248,13 @@ const storageKeys = {
   panels: "纸上竞猜_会审历史",
   profile: "纸上竞猜_成长档案",
   agentSlips: "纸上竞猜_Agent自动模拟单",
+  agentSettings: "纸上竞猜_Agent自动购入设置",
+};
+
+const initialAgentSettings: AgentSettings = {
+  autoBuyEnabled: true,
+  multiplier: 1,
+  maxStake: 200,
 };
 
 const initialProfile: ExperienceProfile = {
@@ -428,6 +443,7 @@ export default function App() {
   const [learningHistory, setLearningHistory] = useState<LearningResult[]>([]);
   const [aiLoading, setAiLoading] = useState(false);
   const [panel, setPanel] = useState<StrategyPanel | null>(null);
+  const [panelPick, setPanelPick] = useState<OrderPick | null>(null);
   const [panelLoading, setPanelLoading] = useState(false);
   const [panelHistory, setPanelHistory] = useState<PanelHistoryItem[]>([]);
   const [profile, setProfile] = useState<ExperienceProfile>(initialProfile);
@@ -444,6 +460,7 @@ export default function App() {
   const [orderDateFilter, setOrderDateFilter] = useState<OrderDateFilter>("全部");
   const [orderMarketWindow, setOrderMarketWindow] = useState<OrderMarketWindow>("胜平负");
   const [agentSlips, setAgentSlips] = useState<AgentSlip[]>([]);
+  const [agentSettings, setAgentSettings] = useState<AgentSettings>(initialAgentSettings);
   const [homeWindow, setHomeWindow] = useState<HomeWindow>("赛季概览");
   const [dataWindow, setDataWindow] = useState<DataWindow>("2026 赔率");
   const [simulationWindow, setSimulationWindow] = useState<SimulationWindow>("人机概览");
@@ -481,13 +498,14 @@ export default function App() {
   useEffect(() => {
     void loadStatus();
     void (async () => {
-      const [savedBalance, savedSlips, savedLearning, savedPanels, savedProfile, savedAgentSlips] = await Promise.all([
+      const [savedBalance, savedSlips, savedLearning, savedPanels, savedProfile, savedAgentSlips, savedAgentSettings] = await Promise.all([
         AsyncStorage.getItem(storageKeys.balance),
         AsyncStorage.getItem(storageKeys.slips),
         AsyncStorage.getItem(storageKeys.learning),
         AsyncStorage.getItem(storageKeys.panels),
         AsyncStorage.getItem(storageKeys.profile),
         AsyncStorage.getItem(storageKeys.agentSlips),
+        AsyncStorage.getItem(storageKeys.agentSettings),
       ]);
       if (savedBalance) setBalance(Number(savedBalance));
       if (savedSlips) setSlips(JSON.parse(savedSlips));
@@ -495,6 +513,7 @@ export default function App() {
       if (savedPanels) setPanelHistory(JSON.parse(savedPanels));
       if (savedProfile) setProfile({ ...initialProfile, ...JSON.parse(savedProfile) });
       if (savedAgentSlips) setAgentSlips(JSON.parse(savedAgentSlips));
+      if (savedAgentSettings) setAgentSettings({ ...initialAgentSettings, ...JSON.parse(savedAgentSettings) });
     })();
   }, [loadStatus]);
 
@@ -627,7 +646,32 @@ export default function App() {
     setError("");
     setSuccess("");
     if (item === "真实数据" && odds.length === 0) void loadLiveData();
+    if (item === "Agent 实验室" && odds.length === 0) void loadLiveData();
     if (item === "虚拟模拟" && (slips.some((slip) => slip.status === "待结算") || agentSlips.some((slip) => slip.status === "待结算"))) void settleNow();
+  };
+
+  const updateAgentSettings = async (next: AgentSettings) => {
+    setAgentSettings(next);
+    await AsyncStorage.setItem(storageKeys.agentSettings, JSON.stringify(next));
+  };
+
+  const chooseAgentBet = (event: Odds, selection: Odds["selections"][number]) => {
+    setSelectedBet({
+      eventId: event.external_event_id,
+      homeTeam: event.home_team,
+      awayTeam: event.away_team,
+      homeFlag: event.home_team_flag_url,
+      awayFlag: event.away_team_flag_url,
+      kickoffTime: event.kickoff_time,
+      selection: selection.selection,
+      odds: selection.odds,
+    });
+    setPanel(null);
+    setPanelPick(null);
+    setAnalysisWindow("当前会审");
+    setPage("多角色分析");
+    setError("");
+    setSuccess("已为 Agent 选择比赛与结果，请启动会审；会审完成后将按当前自动购入设置执行。");
   };
 
   const chooseBet = (event: Odds, selection: Odds["selections"][number]) => {
@@ -642,6 +686,7 @@ export default function App() {
       odds: selection.odds,
     });
     setPanel(null);
+    setPanelPick(null);
     setReason("");
     setStake("25");
     setPage("虚拟模拟");
@@ -667,6 +712,7 @@ export default function App() {
     setOrderDateFilter("全部");
     setOrderMarketWindow("胜平负");
     setPanel(null);
+    setPanelPick(null);
     setPage("比赛下单");
     setError("");
     setSuccess("");
@@ -696,6 +742,7 @@ export default function App() {
     setOrderDateFilter("已结束");
     setOrderMarketWindow("胜平负");
     setPanel(null);
+    setPanelPick(null);
     setPage("比赛下单");
     setError("");
     setSuccess("已进入赛后补购下单中心。复盘票不计入正式盈亏。");
@@ -711,6 +758,7 @@ export default function App() {
 
   const submitIntegratedOrder = async () => {
     if (!orderMatch || orderPicks.length === 0) return setError("请至少选择一个玩法选项。");
+    if (orderMatch.mode === "赛前模拟" && new Date(orderMatch.kickoffTime).getTime() <= Date.now()) return setError("比赛已经开始，不能建立正式模拟票；请从已结束比赛进入赛后复盘。");
     if (orderTotalStake > balance) return setError("练习币余额不足，可以先在虚拟模拟页面补充额度。");
     const now = new Date().toISOString();
     let replayPayout = 0;
@@ -788,6 +836,7 @@ export default function App() {
 
   const submitSlip = async () => {
     if (!selectedBet) return setError("请先从真实赔率中选择一个结果。");
+    if (new Date(selectedBet.kickoffTime).getTime() <= Date.now()) return setError("比赛已经开始，不能建立正式模拟票；请使用赛后复盘玩法。");
     if (stakeNumber <= 0 || stakeNumber > MAX_STAKE) return setError(`单次模拟投入必须为 1 至 ${MAX_STAKE} 练习币。`);
     if (stakeNumber > balance) return setError("练习币余额不足。");
     const recordedReason = reason.trim() || "快速体验：暂未填写理由，赛后需要补充复盘。";
@@ -922,7 +971,9 @@ export default function App() {
     }
   };
 
-  const createAgentSlip = async (bet: SelectedBet, panelResult: StrategyPanel, pick?: OrderPick) => {
+  const createAgentSlip = async (bet: SelectedBet, panelResult: StrategyPanel, pick?: OrderPick, manual = false) => {
+    if (!agentSettings.autoBuyEnabled && !manual) return "自动关闭";
+    if (new Date(bet.kickoffTime).getTime() <= Date.now()) return "已开赛";
     const coordinator = panelResult.coordinator;
     const market = pick?.market || "胜平负";
     const pickLabel = pick?.label || selectionNames[bet.selection];
@@ -934,9 +985,10 @@ export default function App() {
     );
     if (duplicate) return "重复";
     const isExploration = coordinator.decision === "建议观望" || coordinator.recommended_virtual_stake <= 0;
-    const stake = isExploration
+    const baseStake = isExploration
       ? AGENT_EXPLORATION_STAKE
       : Math.min(MAX_STAKE, coordinator.recommended_virtual_stake, coordinator.virtual_stake_limit);
+    const stake = Math.min(MAX_STAKE, agentSettings.maxStake, baseStake * agentSettings.multiplier);
     if (stake <= 0) return "失败";
     const slip: AgentSlip = {
       ...bet,
@@ -956,11 +1008,29 @@ export default function App() {
       totalGoals: pick?.totalGoals,
       agentDecision: coordinator.decision,
       agentExecution: isExploration ? "观望探索" : "按建议执行",
+      agentBaseStake: baseStake,
+      agentMultiplier: agentSettings.multiplier,
     };
     const nextAgentSlips = [slip, ...agentSlips].slice(0, 100);
     setAgentSlips(nextAgentSlips);
     await AsyncStorage.setItem(storageKeys.agentSlips, JSON.stringify(nextAgentSlips));
     return isExploration ? "探索出票" : "已出票";
+  };
+
+  const executeCurrentPanelForAgent = async () => {
+    if (!selectedBet || !panel) return setError("当前没有可执行的会审裁决。");
+    const action = await createAgentSlip(selectedBet, panel, panelPick || undefined, true);
+    setAgentWindow("待结算持仓");
+    if (action === "已出票" || action === "探索出票") {
+      setPage("Agent 实验室");
+      setSuccess(`Agent 已按 ${agentSettings.multiplier} 倍设置建立模拟持仓。`);
+    } else if (action === "重复") {
+      setError("Agent 已持有本场同选项待结算票，不能重复购入。");
+    } else if (action === "已开赛") {
+      setError("比赛已经开始，Agent 不能补建正式模拟票；请使用赛后复盘。");
+    } else {
+      setError("Agent 当前裁决执行失败，请检查最大单票上限设置。");
+    }
   };
 
   const runOrderPanel = async () => {
@@ -980,6 +1050,7 @@ export default function App() {
     };
     setPanelLoading(true);
     setPanel(null);
+    setPanelPick(null);
     setError("");
     try {
       const response = await fetch(`${API_BASE}/api/ai/strategy-panel`, {
@@ -999,16 +1070,22 @@ export default function App() {
       const nextProfile = { ...profile, experience: profile.experience + 20, discipline: profile.discipline + 3, panelsCompleted: profile.panelsCompleted + 1 };
       setSelectedBet(bet);
       setPanel(payload);
+      setPanelPick(focusPick);
       setPanelHistory(nextHistory);
       setProfile(nextProfile);
       if (payload.coordinator.action_reason) setOrderReason(payload.coordinator.action_reason);
       const agentAction = orderMatch.mode === "赛前模拟" ? await createAgentSlip(bet, payload, focusPick) : "复盘跳过";
+      if (agentAction === "已出票" || agentAction === "探索出票") setAgentWindow("待结算持仓");
       setSuccess(agentAction === "已出票"
-        ? "会审已保存，Agent 已按主教练建议自动建立独立模拟票。"
+        ? `会审已保存，Agent 已按 ${agentSettings.multiplier} 倍设置自动建立独立模拟票。`
         : agentAction === "探索出票"
-          ? `会审已保存；主教练建议观望，Agent 已用 ${AGENT_EXPLORATION_STAKE} 练习币最低探索仓自动出票。`
+          ? `会审已保存；主教练建议观望，Agent 已按 ${agentSettings.multiplier} 倍探索设置自动出票。`
         : agentAction === "重复"
           ? "会审已保存；Agent 已持有本场同玩法待结算票，未重复出票。"
+          : agentAction === "自动关闭"
+            ? "会审已保存；Agent 自动购入当前已关闭，可在 Agent 实验室开启或手动执行。"
+          : agentAction === "已开赛"
+            ? "会审已保存；比赛已经开始，Agent 不建立正式自动票。"
           : agentAction === "复盘跳过"
             ? "会审已保存；当前为结果已知的赛后复盘，Agent 不建立正式自动票。"
           : "会审已保存，但 Agent 自动出票失败。");
@@ -1042,6 +1119,7 @@ export default function App() {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "多角色分析失败");
       setPanel(payload);
+      setPanelPick(null);
       const historyItem: PanelHistoryItem = {
         id: `${selectedBet.eventId}-${selectedBet.selection}-${Date.now()}`,
         bet: selectedBet,
@@ -1062,12 +1140,17 @@ export default function App() {
         setReason(payload.coordinator.action_reason);
       }
       const agentAction = await createAgentSlip(selectedBet, payload);
+      if (agentAction === "已出票" || agentAction === "探索出票") setAgentWindow("待结算持仓");
       setSuccess(agentAction === "已出票"
-        ? "会审已保存，Agent 已按建议自动出票；你获得 20 点经验和 3 点纪律分。"
+        ? `会审已保存，Agent 已按 ${agentSettings.multiplier} 倍设置自动出票；你获得 20 点经验和 3 点纪律分。`
         : agentAction === "探索出票"
-          ? `会审已保存；主教练建议观望，Agent 已用 ${AGENT_EXPLORATION_STAKE} 练习币最低探索仓自动出票。`
+          ? `会审已保存；主教练建议观望，Agent 已按 ${agentSettings.multiplier} 倍探索设置自动出票。`
         : agentAction === "重复"
           ? "会审已保存；Agent 已持有本场同选项待结算票，未重复出票。"
+          : agentAction === "自动关闭"
+            ? "会审已保存；Agent 自动购入当前已关闭，可在 Agent 实验室开启或手动执行。"
+          : agentAction === "已开赛"
+            ? "会审已保存；比赛已经开始，Agent 不建立正式自动票。"
           : "会审已保存，但 Agent 自动出票失败。");
       await Promise.all([
         AsyncStorage.setItem(storageKeys.panels, JSON.stringify(nextHistory)),
@@ -1115,6 +1198,7 @@ export default function App() {
   const userHitRate = userSettledSlips.length ? userSettledSlips.filter((item) => item.status === "已命中").length / userSettledSlips.length * 100 : 0;
   const agentHitRate = agentSettledSlips.length ? agentSettledSlips.filter((item) => item.status === "已命中").length / agentSettledSlips.length * 100 : 0;
   const comparisonDifference = realizedProfitLoss - agentRealizedProfitLoss;
+  const futureOdds = useMemo(() => odds.filter((event) => new Date(event.kickoff_time).getTime() > Date.now()), [odds]);
   const replaySwitchMatches = useMemo(() => {
     const unique = new Map<string, ReplayMatch>();
     currentScores
@@ -1451,6 +1535,7 @@ export default function App() {
                   <TextInput value={orderReason} onChangeText={setOrderReason} multiline placeholder="写下本场判断或使用会审建议。" placeholderTextColor="#8a9591" style={styles.input} />
                   <Pressable style={styles.secondaryButton} onPress={runOrderPanel} disabled={panelLoading}><Text style={styles.secondaryButtonText}>{panelLoading ? "多角色正在会审…" : "让多角色审查当前首选项"}</Text></Pressable>
                   {panel ? <View style={styles.inlineAdvice}><Text style={styles.agentName}>主教练建议：{panel.coordinator.decision}</Text><Text style={styles.muted}>{panel.coordinator.action_reason}</Text><Text style={styles.muted}>执行条件：{panel.coordinator.entry_condition}</Text></View> : null}
+                  {panel ? <Pressable style={styles.secondaryButton} onPress={() => { setAgentWindow("待结算持仓"); setPage("Agent 实验室"); }}><Text style={styles.secondaryButtonText}>查看 Agent 自动购入持仓</Text></Pressable> : null}
                   <Pressable style={styles.primaryButton} onPress={submitIntegratedOrder}><Text style={styles.primaryButtonText}>确认出票 · 总投入 {orderTotalStake} 练习币</Text></Pressable>
                 </View>
                 ) : null}
@@ -1471,7 +1556,7 @@ export default function App() {
                     <View style={styles.matchMeta}><Text style={styles.agentTicketBadge}>Agent 自动票 · {slip.status}</Text><Text style={styles.muted}>{zhDate(slip.createdAt)}</Text></View>
                     <SlipTeams slip={slip} />
                     <Text style={styles.slipLine}>{slip.market || "胜平负"} · {slip.pickLabel || selectionNames[slip.selection]} · {slip.odds.toFixed(2)}</Text>
-                    <Text style={styles.muted}>主教练裁决：{slip.agentDecision} · 执行：{slip.agentExecution || "按建议执行"} · 投入 {slip.stake} · 潜在返还 {slip.potentialReturn}</Text>
+                    <Text style={styles.muted}>主教练裁决：{slip.agentDecision} · 执行：{slip.agentExecution || "按建议执行"} · {slip.agentBaseStake || slip.stake} × {slip.agentMultiplier || 1} 倍 · 投入 {slip.stake} · 潜在返还 {slip.potentialReturn}</Text>
                   </View>
                 ))}
                 {slips.filter((slip) => slip.eventId === orderMatch.eventId).length === 0 && agentSlips.filter((slip) => slip.eventId === orderMatch.eventId).length === 0 ? <Text style={styles.dataMessage}>本场尚未出票。</Text> : null}
@@ -1611,7 +1696,7 @@ export default function App() {
                 <View style={styles.matchMeta}><Text style={styles.agentTicketBadge}>Agent 自动票 · {slip.status}</Text><Text style={styles.muted}>{zhDate(slip.createdAt)}</Text></View>
                 <SlipTeams slip={slip} />
                 <Text style={styles.slipLine}>{slip.market || "胜平负"} · {slip.pickLabel || selectionNames[slip.selection]} · 赔率 {slip.odds.toFixed(2)}</Text>
-                <Text style={styles.slipLine}>裁决：{slip.agentDecision} · 执行：{slip.agentExecution || "按建议执行"} · 投入 {slip.stake} · 潜在返还 {slip.potentialReturn}</Text>
+                <Text style={styles.slipLine}>裁决：{slip.agentDecision} · 执行：{slip.agentExecution || "按建议执行"} · {slip.agentBaseStake || slip.stake} × {slip.agentMultiplier || 1} 倍 · 投入 {slip.stake} · 潜在返还 {slip.potentialReturn}</Text>
                 <Text style={styles.muted}>理由：{slip.reason}</Text>
                 {slip.payout !== undefined ? <Text style={styles.slipLine}>实际返还：{slip.payout} · 本票盈亏：{((slip.payout || 0) - slip.stake).toFixed(2)}</Text> : <Text style={styles.muted}>等待真实赛果结算</Text>}
               </View>
@@ -1637,6 +1722,44 @@ export default function App() {
                   <Text style={styles.agentLabRule}>主教练建议“观望”：Agent 仍使用 {AGENT_EXPLORATION_STAKE} 练习币最低探索仓自动购入，用真实赛果验证观望判断。</Text>
                   <Text style={styles.muted}>Agent 票不会占用你的练习币，也不会混入你的盈亏。</Text>
                 </View>
+                <View style={styles.panel}>
+                  <View style={styles.matchMeta}><Text style={styles.panelTitle}>Agent 自动购入设置</Text><Text style={agentSettings.autoBuyEnabled ? styles.readyText : styles.pendingText}>{agentSettings.autoBuyEnabled ? "自动购入已开启" : "自动购入已关闭"}</Text></View>
+                  <Pressable style={agentSettings.autoBuyEnabled ? styles.secondaryButton : styles.primaryButton} onPress={() => void updateAgentSettings({ ...agentSettings, autoBuyEnabled: !agentSettings.autoBuyEnabled })}>
+                    <Text style={agentSettings.autoBuyEnabled ? styles.secondaryButtonText : styles.primaryButtonText}>{agentSettings.autoBuyEnabled ? "关闭自动购入" : "开启自动购入"}</Text>
+                  </Pressable>
+                  <Text style={styles.inputLabel}>Agent 购入倍数</Text>
+                  <View style={styles.quickRow}>{[1, 2, 5, 10].map((value) => (
+                    <Pressable key={value} onPress={() => void updateAgentSettings({ ...agentSettings, multiplier: value })} style={[styles.quickChip, agentSettings.multiplier === value && styles.quickChipActive]}>
+                      <Text style={[styles.quickChipText, agentSettings.multiplier === value && styles.quickChipTextActive]}>{value} 倍</Text>
+                    </Pressable>
+                  ))}</View>
+                  <Text style={styles.inputLabel}>最大单票上限</Text>
+                  <View style={styles.quickRow}>{[20, 50, 100, 200, 500].map((value) => (
+                    <Pressable key={value} onPress={() => void updateAgentSettings({ ...agentSettings, maxStake: value })} style={[styles.quickChip, agentSettings.maxStake === value && styles.quickChipActive]}>
+                      <Text style={[styles.quickChipText, agentSettings.maxStake === value && styles.quickChipTextActive]}>{value} 币</Text>
+                    </Pressable>
+                  ))}</View>
+                  <Text style={styles.muted}>最终投入 = 主教练建议仓位 × {agentSettings.multiplier} 倍，且不超过 {agentSettings.maxStake} 币。观望探索基础仓为 {AGENT_EXPLORATION_STAKE} 币。</Text>
+                </View>
+                <View style={styles.switchPanel}>
+                  <View style={styles.matchMeta}><Text style={styles.panelTitle}>直接为 Agent 选择比赛</Text><Text style={styles.realOddsBadge}>真实胜平负赔率</Text></View>
+                  <Text style={styles.muted}>选择一个比赛结果后会直接进入会审；会审完成后按上方设置自动购入。</Text>
+                  {odds.length === 0 ? <Pressable style={styles.primaryButton} onPress={loadLiveData}><Text style={styles.primaryButtonText}>加载 2026 真实比赛</Text></Pressable> : futureOdds.length === 0 ? <Text style={styles.dataMessage}>当前赔率列表没有尚未开赛的比赛，Agent 不会建立赛后正式票。</Text> : (
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.matchSwitcherRow}>
+                      {futureOdds.map((event) => (
+                        <View key={event.external_event_id} style={styles.agentSelectionCard}>
+                          <View style={styles.switchFlags}><Team name={event.home_team} flag={event.home_team_flag_url} /><Text style={styles.versus}>对阵</Text><Team name={event.away_team} flag={event.away_team_flag_url} /></View>
+                          <Text style={styles.switchDate}>{zhDate(event.kickoff_time)}</Text>
+                          <View style={styles.oddsRow}>{event.selections.map((selection) => (
+                            <Pressable key={selection.selection} onPress={() => chooseAgentBet(event, selection)} style={styles.oddsCell}>
+                              <Text style={styles.oddsLabel}>{selectionNames[selection.selection]}</Text><Text style={styles.oddsValue}>{selection.odds.toFixed(2)}</Text><Text style={styles.oddsAction}>选择后进入会审</Text>
+                            </Pressable>
+                          ))}</View>
+                        </View>
+                      ))}
+                    </ScrollView>
+                  )}
+                </View>
                 <View style={styles.comparisonPanel}>
                   <Text style={styles.panelTitle}>Agent 当前表现</Text>
                   <View style={styles.comparisonGrid}>
@@ -1646,7 +1769,6 @@ export default function App() {
                   <Text style={styles.slipLine}>观望探索票：{agentSlips.filter((item) => item.agentExecution === "观望探索").length} · 按建议执行票：{agentSlips.filter((item) => item.agentExecution !== "观望探索").length}</Text>
                   <Text style={styles.comparisonDifference}>你相对 Agent：{comparisonDifference >= 0 ? "领先" : "落后"} {Math.abs(comparisonDifference).toFixed(2)} 练习币</Text>
                 </View>
-                <Pressable style={styles.primaryButton} onPress={() => setPage("多角色分析")}><Text style={styles.primaryButtonText}>启动会审，让 Agent 自动购入</Text></Pressable>
                 <Pressable style={styles.secondaryButton} onPress={settleNow} disabled={liveDataLoading}><Text style={styles.secondaryButtonText}>{liveDataLoading ? "正在核对真实赛果…" : "立即结算 Agent 已结束比赛"}</Text></Pressable>
               </>
             ) : null}
@@ -1657,7 +1779,7 @@ export default function App() {
                     <View style={styles.matchMeta}><Text style={styles.agentTicketBadge}>Agent 持仓 · 待结算</Text><Text style={styles.muted}>{zhDate(slip.createdAt)}</Text></View>
                     <SlipTeams slip={slip} />
                     <Text style={styles.slipLine}>{slip.market || "胜平负"} · {slip.pickLabel || selectionNames[slip.selection]} · 赔率 {slip.odds.toFixed(2)}</Text>
-                    <Text style={styles.slipLine}>执行：{slip.agentExecution || "按建议执行"} · 投入 {slip.stake} · 潜在返还 {slip.potentialReturn}</Text>
+                    <Text style={styles.slipLine}>执行：{slip.agentExecution || "按建议执行"} · {slip.agentBaseStake || slip.stake} × {slip.agentMultiplier || 1} 倍 · 投入 {slip.stake} · 潜在返还 {slip.potentialReturn}</Text>
                     <Text style={styles.muted}>裁决：{slip.agentDecision} · {slip.reason}</Text>
                   </View>
                 ))}
@@ -1671,7 +1793,7 @@ export default function App() {
                     <SlipTeams slip={slip} />
                     <Text style={styles.slipLine}>{slip.market || "胜平负"} · {slip.pickLabel || selectionNames[slip.selection]} · 投入 {slip.stake}</Text>
                     <Text style={styles.slipLine}>实际返还 {slip.payout || 0} · 本票盈亏 {((slip.payout || 0) - slip.stake).toFixed(2)}</Text>
-                    <Text style={styles.muted}>执行：{slip.agentExecution || "按建议执行"} · 裁决：{slip.agentDecision}</Text>
+                    <Text style={styles.muted}>执行：{slip.agentExecution || "按建议执行"} · {slip.agentBaseStake || slip.stake} × {slip.agentMultiplier || 1} 倍 · 裁决：{slip.agentDecision}</Text>
                   </View>
                 ))}
               </>
@@ -1718,6 +1840,9 @@ export default function App() {
                 <Text style={styles.learningLabel}>建议投入 / 仓位上限</Text><Text style={styles.coordinatorLimit}>{panel.coordinator.recommended_virtual_stake} / {panel.coordinator.virtual_stake_limit} 练习币</Text>
                 <Text style={styles.exercise}>复盘问题：{panel.coordinator.review_question}</Text>
                 <Text style={styles.exercise}>{panel.coordinator.decision === "建议观望" ? `Agent 执行结果：保留观望裁决，同时用 ${AGENT_EXPLORATION_STAKE} 练习币最低探索仓自动出票。` : "Agent 执行结果：会审完成后按建议仓位自动建立独立模拟票。"}</Text>
+                <Text style={styles.exercise}>当前 Agent 设置：{agentSettings.autoBuyEnabled ? "自动购入开启" : "自动购入关闭"} · {agentSettings.multiplier} 倍 · 单票上限 {agentSettings.maxStake} 币</Text>
+                <Pressable style={styles.lightButton} onPress={() => void executeCurrentPanelForAgent()}><Text style={styles.lightButtonText}>按当前设置手动执行 Agent 购入</Text></Pressable>
+                <Pressable style={styles.lightButton} onPress={() => { setAgentWindow("待结算持仓"); setPage("Agent 实验室"); }}><Text style={styles.lightButtonText}>查看 Agent 待结算持仓</Text></Pressable>
                 {panel.coordinator.recommended_virtual_stake > 0 ? (
                   <Pressable style={styles.lightButton} onPress={() => {
                     setStake(String(panel.coordinator.recommended_virtual_stake));
@@ -1741,7 +1866,7 @@ export default function App() {
             <>
             <SectionTitle caption="永久保存在当前设备，可重新查看角色观点和最终建议">会审历史</SectionTitle>
             {panelHistory.length === 0 ? <Text style={styles.dataMessage}>尚无会审历史。</Text> : panelHistory.map((item) => (
-              <Pressable key={item.id} style={styles.historyCard} onPress={() => { setSelectedBet(item.bet); setPanel(item.panel); setAnalysisWindow("当前会审"); }}>
+              <Pressable key={item.id} style={styles.historyCard} onPress={() => { setSelectedBet(item.bet); setPanel(item.panel); setPanelPick(null); setAnalysisWindow("当前会审"); }}>
                 <View style={styles.matchMeta}><Text style={styles.panelTitle}>{zhTeam(item.bet.homeTeam)} 对阵 {zhTeam(item.bet.awayTeam)}</Text><Text style={styles.muted}>{zhDate(item.createdAt)}</Text></View>
                 <Text style={styles.slipLine}>{selectionNames[item.bet.selection]} · 赔率 {item.bet.odds.toFixed(2)} · {item.panel.coordinator.decision}</Text>
                 <Text numberOfLines={2} style={styles.muted}>{item.panel.coordinator.action_reason}</Text>
@@ -1942,6 +2067,7 @@ const styles = StyleSheet.create({
   switchPanel: { backgroundColor: "#fffdf8", borderWidth: 1, borderColor: "#dedbd1", borderRadius: 18, padding: 16, gap: 12 },
   matchSwitcherRow: { gap: 9, paddingRight: 10 },
   matchSwitcherCard: { width: 250, backgroundColor: "#eef4f2", borderWidth: 1, borderColor: "#d7e0dd", borderRadius: 14, padding: 12, gap: 8 },
+  agentSelectionCard: { width: 330, backgroundColor: "#eef4f2", borderWidth: 1, borderColor: "#d7e0dd", borderRadius: 14, padding: 12, gap: 10 },
   matchSwitcherCardActive: { borderColor: "#0d7565", borderWidth: 3, backgroundColor: "#d9eee8" },
   switchFlags: { flexDirection: "row", alignItems: "center", gap: 5 },
   switchDate: { color: "#66736f", fontSize: 11, textAlign: "center" },
