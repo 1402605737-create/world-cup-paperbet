@@ -188,6 +188,11 @@ type StrategyPanel = {
     action_reason: string;
     entry_condition: string;
     review_question: string;
+    opportunity_tags?: string[];
+    action_checklist?: string[];
+    preferred_ticket_structure?: string;
+    avoid_list?: string[];
+    alternative_view?: string;
   };
   fallback: false;
 };
@@ -1198,6 +1203,47 @@ export default function App() {
   const userHitRate = userSettledSlips.length ? userSettledSlips.filter((item) => item.status === "已命中").length / userSettledSlips.length * 100 : 0;
   const agentHitRate = agentSettledSlips.length ? agentSettledSlips.filter((item) => item.status === "已命中").length / agentSettledSlips.length * 100 : 0;
   const comparisonDifference = realizedProfitLoss - agentRealizedProfitLoss;
+  const currentMatchUserSlips = useMemo(
+    () => orderMatch ? slips.filter((slip) => slip.eventId === orderMatch.eventId) : [],
+    [orderMatch?.eventId, slips],
+  );
+  const currentMatchAgentSlips = useMemo(
+    () => orderMatch ? agentSlips.filter((slip) => slip.eventId === orderMatch.eventId) : [],
+    [agentSlips, orderMatch?.eventId],
+  );
+  const currentMatchTickets = useMemo(
+    () => [
+      ...currentMatchUserSlips.map((slip) => ({ owner: "我的票" as const, slip })),
+      ...currentMatchAgentSlips.map((slip) => ({ owner: "Agent票" as const, slip })),
+    ],
+    [currentMatchAgentSlips, currentMatchUserSlips],
+  );
+  const currentMatchStats = useMemo(() => {
+    const settled = currentMatchTickets.filter(({ slip }) => slip.status === "已命中" || slip.status === "未命中");
+    const won = settled.filter(({ slip }) => slip.status === "已命中");
+    const statusCounts = currentMatchTickets.reduce<Record<string, number>>((map, { slip }) => {
+      map[slip.status] = (map[slip.status] || 0) + 1;
+      return map;
+    }, {});
+    const marketCounts = currentMatchTickets.reduce<Record<string, number>>((map, { slip }) => {
+      const key = slip.market || "胜平负";
+      map[key] = (map[key] || 0) + 1;
+      return map;
+    }, {});
+    return {
+      total: currentMatchTickets.length,
+      user: currentMatchUserSlips.length,
+      agent: currentMatchAgentSlips.length,
+      stake: currentMatchTickets.reduce((sum, { slip }) => sum + slip.stake, 0),
+      pendingStake: currentMatchTickets.filter(({ slip }) => slip.status === "待结算").reduce((sum, { slip }) => sum + slip.stake, 0),
+      potentialReturn: currentMatchTickets.reduce((sum, { slip }) => sum + slip.potentialReturn, 0),
+      settled: settled.length,
+      hitRate: settled.length ? won.length / settled.length * 100 : 0,
+      realized: settled.reduce((sum, { slip }) => sum + (slip.payout || 0) - slip.stake, 0),
+      statusCounts,
+      marketCounts,
+    };
+  }, [currentMatchAgentSlips.length, currentMatchTickets, currentMatchUserSlips.length]);
   const futureOdds = useMemo(() => odds.filter((event) => new Date(event.kickoff_time).getTime() > Date.now()), [odds]);
   const replaySwitchMatches = useMemo(() => {
     const unique = new Map<string, ReplayMatch>();
@@ -1251,13 +1297,11 @@ export default function App() {
     (!normalizedOrderSearch ||
       `${item.home_team} ${item.away_team} ${zhTeam(item.home_team)} ${zhTeam(item.away_team)}`.toLowerCase().includes(normalizedOrderSearch)),
   );
-  const currentMatchTicketCount = orderMatch
-    ? slips.filter((slip) => slip.eventId === orderMatch.eventId).length + agentSlips.filter((slip) => slip.eventId === orderMatch.eventId).length
-    : 0;
+  const currentMatchTicketCount = currentMatchStats.total;
 
   return (
     <SafeAreaView style={styles.safe}>
-      <ScrollView contentContainerStyle={styles.container}>
+      <ScrollView style={styles.pageScroll} contentContainerStyle={styles.container} nestedScrollEnabled keyboardShouldPersistTaps="handled">
         <View style={styles.brandBlock}>
           <Text style={styles.eyebrow}>2026 世界杯纸上竞猜</Text>
           <Text style={styles.brandTitle}>2026 世界杯虚拟策略实验室</Text>
@@ -1433,23 +1477,23 @@ export default function App() {
                       ))}
                     </View>
                     <Text style={styles.inputLabel}>2026 当前赔率比赛</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.matchSwitcherRow}>
+                    <View style={styles.matchSwitcherGrid}>
                       {visibleOrderOdds.map((item) => (
                         <Pressable key={item.external_event_id} onPress={() => openOrderCenter(item)} style={[styles.matchSwitcherCard, orderMatch.eventId === item.external_event_id && styles.matchSwitcherCardActive]}>
                           <View style={styles.switchFlags}><Team name={item.home_team} flag={item.home_team_flag_url} /><Text style={styles.versus}>对阵</Text><Team name={item.away_team} flag={item.away_team_flag_url} /></View>
                           <Text style={styles.switchDate}>{zhDate(item.kickoff_time)}</Text>
                         </Pressable>
                       ))}
-                    </ScrollView>
+                    </View>
                     <Text style={styles.inputLabel}>已结束比赛复盘</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.matchSwitcherRow}>
+                    <View style={styles.matchSwitcherGrid}>
                       {visibleReplaySwitchMatches.map((item) => (
                         <Pressable key={item.external_match_id} onPress={() => openReplayOrderCenter(item)} style={[styles.matchSwitcherCard, orderMatch.eventId === item.external_match_id && styles.matchSwitcherCardActive]}>
                           <View style={styles.switchFlags}><Team name={item.home_team} flag={item.home_team_flag_url} /><Text style={styles.versus}>对阵</Text><Team name={item.away_team} flag={item.away_team_flag_url} /></View>
                           <Text style={styles.switchScore}>{item.home_score} : {item.away_score}</Text>
                         </Pressable>
                       ))}
-                    </ScrollView>
+                    </View>
                     {visibleOrderOdds.length === 0 && visibleReplaySwitchMatches.length === 0 ? <Text style={styles.dataMessage}>没有匹配该国家或球队的比赛。</Text> : null}
                   </View>
                 ) : null}
@@ -1543,7 +1587,26 @@ export default function App() {
                 {orderWindow === "本场票据" ? (
                   <>
                 <SectionTitle caption="你的票与 Agent 自动票统一展示，已结算票显示国旗和最终比分">本场人机票据历史</SectionTitle>
-                {slips.filter((slip) => slip.eventId === orderMatch.eventId).map((slip) => (
+                <View style={styles.ticketStatsPanel}>
+                  <View style={styles.matchMeta}><Text style={styles.panelTitle}>本场全部彩票总体统计</Text><Text style={styles.agentTicketBadge}>{currentMatchStats.total} 张</Text></View>
+                  <View style={styles.ticketStatsGrid}>
+                    <View style={styles.ticketStatCard}><Text style={styles.ticketStatLabel}>你的票 / Agent</Text><Text style={styles.ticketStatValue}>{currentMatchStats.user} / {currentMatchStats.agent}</Text></View>
+                    <View style={styles.ticketStatCard}><Text style={styles.ticketStatLabel}>总投入</Text><Text style={styles.ticketStatValue}>{currentMatchStats.stake.toFixed(0)}</Text></View>
+                    <View style={styles.ticketStatCard}><Text style={styles.ticketStatLabel}>待结算敞口</Text><Text style={styles.ticketStatValue}>{currentMatchStats.pendingStake.toFixed(0)}</Text></View>
+                    <View style={styles.ticketStatCard}><Text style={styles.ticketStatLabel}>潜在返还</Text><Text style={styles.ticketStatValue}>{currentMatchStats.potentialReturn.toFixed(2)}</Text></View>
+                    <View style={styles.ticketStatCard}><Text style={styles.ticketStatLabel}>已结算盈亏</Text><Text style={styles.ticketStatValue}>{currentMatchStats.realized >= 0 ? "+" : ""}{currentMatchStats.realized.toFixed(2)}</Text></View>
+                    <View style={styles.ticketStatCard}><Text style={styles.ticketStatLabel}>命中率</Text><Text style={styles.ticketStatValue}>{currentMatchStats.hitRate.toFixed(1)}%</Text></View>
+                  </View>
+                  <Text style={styles.inputLabel}>玩法分布</Text>
+                  <View style={styles.marketPillRow}>
+                    {Object.entries(currentMatchStats.marketCounts).length === 0 ? <Text style={styles.muted}>暂无玩法记录</Text> : Object.entries(currentMatchStats.marketCounts).map(([label, count]) => <Text key={label} style={styles.marketPill}>{label} {count}</Text>)}
+                  </View>
+                  <Text style={styles.inputLabel}>状态分布</Text>
+                  <View style={styles.marketPillRow}>
+                    {Object.entries(currentMatchStats.statusCounts).length === 0 ? <Text style={styles.muted}>暂无状态记录</Text> : Object.entries(currentMatchStats.statusCounts).map(([label, count]) => <Text key={label} style={styles.marketPill}>{label} {count}</Text>)}
+                  </View>
+                </View>
+                {currentMatchUserSlips.map((slip) => (
                   <View key={slip.id} style={styles.slipCard}>
                     <View style={styles.matchMeta}><Text style={styles.matchStage}>你的票 · {slip.status}</Text><Text style={styles.muted}>{zhDate(slip.createdAt)}</Text></View>
                     <SlipTeams slip={slip} />
@@ -1551,7 +1614,7 @@ export default function App() {
                     <Text style={styles.muted}>投入 {slip.stake} · 潜在返还 {slip.potentialReturn}</Text>
                   </View>
                 ))}
-                {agentSlips.filter((slip) => slip.eventId === orderMatch.eventId).map((slip) => (
+                {currentMatchAgentSlips.map((slip) => (
                   <View key={slip.id} style={styles.agentSlipCard}>
                     <View style={styles.matchMeta}><Text style={styles.agentTicketBadge}>Agent 自动票 · {slip.status}</Text><Text style={styles.muted}>{zhDate(slip.createdAt)}</Text></View>
                     <SlipTeams slip={slip} />
@@ -1559,7 +1622,7 @@ export default function App() {
                     <Text style={styles.muted}>主教练裁决：{slip.agentDecision} · 执行：{slip.agentExecution || "按建议执行"} · {slip.agentBaseStake || slip.stake} × {slip.agentMultiplier || 1} 倍 · 投入 {slip.stake} · 潜在返还 {slip.potentialReturn}</Text>
                   </View>
                 ))}
-                {slips.filter((slip) => slip.eventId === orderMatch.eventId).length === 0 && agentSlips.filter((slip) => slip.eventId === orderMatch.eventId).length === 0 ? <Text style={styles.dataMessage}>本场尚未出票。</Text> : null}
+                {currentMatchTicketCount === 0 ? <Text style={styles.dataMessage}>本场尚未出票。</Text> : null}
                   </>
                 ) : null}
               </>
@@ -1803,7 +1866,7 @@ export default function App() {
 
         {page === "多角色分析" ? (
           <>
-            <SectionTitle caption="三个不同人格独立分析，主教练汇总后自动决定 Agent 出票或观望">多角色策略会审</SectionTitle>
+            <SectionTitle caption="五类 Agent 从赔率、战术、市场、反方和仓位角度独立会审，主教练输出可执行清单">多角色策略会审</SectionTitle>
             <WindowTabs value={analysisWindow} onChange={setAnalysisWindow} items={[
               ["当前会审", "当前会审"],
               ["人机对比", "人机对比"],
@@ -1814,8 +1877,9 @@ export default function App() {
             {selectedBet ? (
               <View style={styles.panel}>
                 <Text style={styles.panelTitle}>{zhTeam(selectedBet.homeTeam)} 对阵 {zhTeam(selectedBet.awayTeam)}</Text>
-                <Text style={styles.selectionTitle}>当前选择：{selectionNames[selectedBet.selection]} · 赔率 {selectedBet.odds.toFixed(2)}</Text>
-                <Pressable style={styles.primaryButton} onPress={runPanel} disabled={panelLoading}><Text style={styles.primaryButtonText}>{panelLoading ? "四位角色正在协作…" : "启动真实多角色会审"}</Text></Pressable>
+                <Text style={styles.selectionTitle}>当前选择：{panelPick ? `${panelPick.market} · ${panelPick.label}` : selectionNames[selectedBet.selection]} · 赔率 {selectedBet.odds.toFixed(2)}</Text>
+                {panelPick ? <Text style={styles.muted}>本次来自整合下单中心，会审聚焦当前首选项，同时评估替代票型与禁买点。</Text> : null}
+                <Pressable style={styles.primaryButton} onPress={runPanel} disabled={panelLoading}><Text style={styles.primaryButtonText}>{panelLoading ? "五类 Agent 正在会审…" : "启动五类 Agent 会审"}</Text></Pressable>
               </View>
             ) : <Text style={styles.dataMessage}>请先到“真实数据”页面选择一个赔率，才能启动会审。</Text>}
             {panelLoading ? <ActivityIndicator color="#0d685a" size="large" /> : null}
@@ -1833,9 +1897,36 @@ export default function App() {
                 <Text style={styles.learningLabel}>主教练·裁决官</Text>
                 <Text style={styles.learningLabel}>最终虚拟行动建议</Text>
                 <Text style={styles.coordinatorDecision}>{panel.coordinator.decision}</Text>
+                {panel.coordinator.opportunity_tags?.length ? (
+                  <View style={styles.coordinatorTagRow}>
+                    {panel.coordinator.opportunity_tags.map((item) => <Text key={item} style={styles.coordinatorTag}>{item}</Text>)}
+                  </View>
+                ) : null}
                 <Text style={styles.learningSummary}>{panel.coordinator.summary}</Text>
                 <Text style={styles.learningLabel}>行动理由</Text><Text style={styles.learningSummary}>{panel.coordinator.action_reason}</Text>
+                {panel.coordinator.preferred_ticket_structure ? (
+                  <>
+                    <Text style={styles.learningLabel}>建议票型结构</Text><Text style={styles.learningSummary}>{panel.coordinator.preferred_ticket_structure}</Text>
+                  </>
+                ) : null}
+                {panel.coordinator.action_checklist?.length ? (
+                  <>
+                    <Text style={styles.learningLabel}>执行清单</Text>
+                    {panel.coordinator.action_checklist.map((item) => <Text key={item} style={styles.coordinatorCheck}>• {item}</Text>)}
+                  </>
+                ) : null}
                 <Text style={styles.learningLabel}>执行条件</Text><Text style={styles.learningSummary}>{panel.coordinator.entry_condition}</Text>
+                {panel.coordinator.alternative_view ? (
+                  <>
+                    <Text style={styles.learningLabel}>反手或替代方案</Text><Text style={styles.learningSummary}>{panel.coordinator.alternative_view}</Text>
+                  </>
+                ) : null}
+                {panel.coordinator.avoid_list?.length ? (
+                  <>
+                    <Text style={styles.learningLabel}>不要买的情形</Text>
+                    {panel.coordinator.avoid_list.map((item) => <Text key={item} style={styles.coordinatorCheck}>• {item}</Text>)}
+                  </>
+                ) : null}
                 <Text style={styles.learningLabel}>核心分歧</Text><Text style={styles.learningSummary}>{panel.coordinator.disagreements}</Text>
                 <Text style={styles.learningLabel}>建议投入 / 仓位上限</Text><Text style={styles.coordinatorLimit}>{panel.coordinator.recommended_virtual_stake} / {panel.coordinator.virtual_stake_limit} 练习币</Text>
                 <Text style={styles.exercise}>复盘问题：{panel.coordinator.review_question}</Text>
@@ -1971,6 +2062,7 @@ function LearningCard({ result }: { result: LearningResult }) {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#f2f0e9" },
+  pageScroll: { flex: 1 },
   container: { width: "100%", maxWidth: 780, alignSelf: "center", padding: 20, gap: 17 },
   flex: { flex: 1, gap: 4 },
   brandBlock: { gap: 8, paddingTop: 18 },
@@ -2066,7 +2158,8 @@ const styles = StyleSheet.create({
   marketWindowTabTextActive: { color: "#ffffff" },
   switchPanel: { backgroundColor: "#fffdf8", borderWidth: 1, borderColor: "#dedbd1", borderRadius: 18, padding: 16, gap: 12 },
   matchSwitcherRow: { gap: 9, paddingRight: 10 },
-  matchSwitcherCard: { width: 250, backgroundColor: "#eef4f2", borderWidth: 1, borderColor: "#d7e0dd", borderRadius: 14, padding: 12, gap: 8 },
+  matchSwitcherGrid: { flexDirection: "row", flexWrap: "wrap", gap: 9 },
+  matchSwitcherCard: { width: 250, maxWidth: "100%", backgroundColor: "#eef4f2", borderWidth: 1, borderColor: "#d7e0dd", borderRadius: 14, padding: 12, gap: 8 },
   agentSelectionCard: { width: 330, backgroundColor: "#eef4f2", borderWidth: 1, borderColor: "#d7e0dd", borderRadius: 14, padding: 12, gap: 10 },
   matchSwitcherCardActive: { borderColor: "#0d7565", borderWidth: 3, backgroundColor: "#d9eee8" },
   switchFlags: { flexDirection: "row", alignItems: "center", gap: 5 },
@@ -2088,6 +2181,13 @@ const styles = StyleSheet.create({
   orderLine: { flexDirection: "row", justifyContent: "space-between", gap: 8, borderTopWidth: 1, borderTopColor: "#dedbd1", paddingTop: 8 },
   orderLineText: { color: "#173e37", flex: 1, fontSize: 12, fontWeight: "800" },
   orderReturn: { color: "#0d685a", fontSize: 12, fontWeight: "900" },
+  ticketStatsPanel: { backgroundColor: "#fffdf8", borderWidth: 2, borderColor: "#0d7565", borderRadius: 20, padding: 16, gap: 12 },
+  ticketStatsGrid: { flexDirection: "row", flexWrap: "wrap", gap: 9 },
+  ticketStatCard: { flexGrow: 1, minWidth: 150, backgroundColor: "#e7f2ef", borderRadius: 13, padding: 12, gap: 4 },
+  ticketStatLabel: { color: "#56706a", fontSize: 11, fontWeight: "900" },
+  ticketStatValue: { color: "#173e37", fontSize: 20, fontWeight: "900" },
+  marketPillRow: { flexDirection: "row", flexWrap: "wrap", gap: 7 },
+  marketPill: { color: "#0d685a", backgroundColor: "#d9eee8", borderRadius: 99, paddingHorizontal: 10, paddingVertical: 6, fontSize: 11, fontWeight: "900" },
   inlineAdvice: { backgroundColor: "#d9eee8", borderRadius: 12, padding: 12, gap: 4 },
   selectionSummary: { backgroundColor: "#d9eee8", padding: 13, borderRadius: 12, flexDirection: "row", justifyContent: "space-between" },
   selectionTitle: { color: "#173e37", fontWeight: "900" },
@@ -2114,6 +2214,9 @@ const styles = StyleSheet.create({
   coordinatorCard: { backgroundColor: "#173e37", borderRadius: 22, padding: 20, gap: 11 },
   coordinatorDecision: { color: "#ffffff", fontSize: 25, fontWeight: "900" },
   coordinatorLimit: { color: "#8dd1c3", fontSize: 22, fontWeight: "900" },
+  coordinatorTagRow: { flexDirection: "row", flexWrap: "wrap", gap: 7 },
+  coordinatorTag: { color: "#173e37", backgroundColor: "#bce4da", borderRadius: 99, paddingHorizontal: 10, paddingVertical: 6, fontSize: 11, fontWeight: "900" },
+  coordinatorCheck: { color: "#ffffff", backgroundColor: "#31564f", borderRadius: 12, padding: 11, lineHeight: 19, fontWeight: "700" },
   learningCard: { backgroundColor: "#173e37", borderRadius: 22, padding: 20, gap: 11 },
   learningLabel: { color: "#8dd1c3", fontSize: 11, fontWeight: "900", letterSpacing: 1.2, marginTop: 4 },
   learningTitle: { color: "#ffffff", fontSize: 22, lineHeight: 29, fontWeight: "900" },

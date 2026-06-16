@@ -37,6 +37,11 @@ const panelDecisionSchema = z.object({
   action_reason: z.string().min(1).max(400),
   entry_condition: z.string().min(1).max(400),
   review_question: z.string().min(1).max(300),
+  opportunity_tags: z.array(z.string().min(1).max(40)).min(3).max(6),
+  action_checklist: z.array(z.string().min(1).max(140)).min(3).max(6),
+  preferred_ticket_structure: z.string().min(1).max(300),
+  avoid_list: z.array(z.string().min(1).max(140)).min(2).max(5),
+  alternative_view: z.string().min(1).max(300),
 });
 
 export type DeepSeekVerification = z.infer<typeof verificationSchema> & {
@@ -164,14 +169,24 @@ const rolePrompts = [
     task: "计算赔率隐含概率，并判断该选择需要多高的主观胜率才能具备正期望。",
   },
   {
+    agent_name: "赛程战术师·场景派",
+    personality: "关注赛程、阵容不确定性和比赛动机，不把赔率当成唯一答案",
+    task: "从比赛场景、强弱关系和可能的战术剧本解释该选择适合或不适合练习的原因。",
+  },
+  {
+    agent_name: "盘口观察员·市场派",
+    personality: "敏感、善于比较赔率结构，关注低赔陷阱和冷门补偿",
+    task: "分析主胜、平局、客胜之间的赔率结构，给出是否需要考虑替代选择。",
+  },
+  {
     agent_name: "反方审计员·唱反调",
     personality: "怀疑、挑剔、专门寻找判断漏洞",
     task: "主动反驳该选择，指出信息缺口、赔率陷阱和不能从现有数据推出的结论。",
   },
   {
-    agent_name: "风险管理员·守门员",
+    agent_name: "仓位经理·纪律派",
     personality: "保守、纪律优先、关注最坏结果",
-    task: "评估虚拟练习币仓位风险，并给出不超过 500 练习币的上限建议。",
+    task: "把判断转化为具体虚拟仓位、止损规则、是否拆单和赛后复盘指标。",
   },
 ] as const;
 
@@ -189,23 +204,48 @@ export async function generateStrategyPanel(input: StrategyPanelInput): Promise<
   );
 
   const coordinator = await callDeepSeekJson(
-    "你是世界杯纸上竞猜的主教练·裁决官。你不迎合任何一方，只汇总分歧、控制风险，并给出明确且有区分度的虚拟模拟行动。不得仅因为比赛存在不确定性就机械选择建议观望；必须比较证据强弱、赔率隐含概率和角色置信度，在虚拟买入、小仓试验、建议观望之间择一。只讨论虚拟练习币，不提供真实资金建议，不承诺结果。只输出合法 JSON，所有自然语言必须为简体中文。",
-    `赔率快照：${inputJson}。三个独立角色意见：${JSON.stringify(agents)}。裁决规则：证据明显支持当前选择时可虚拟买入；证据有优势但分歧仍大时应小仓试验；只有证据不足、赔率明显不合理或风险无法描述时才建议观望。请返回：{"decision":"虚拟买入、小仓试验或建议观望","summary":"综合裁决","disagreements":"角色之间最重要的分歧","virtual_stake_limit":0到500的整数,"recommended_virtual_stake":0到200的整数，建议观望时必须为0,"action_reason":"为什么采取该行动","entry_condition":"执行该虚拟行动前需要满足的条件，观望时说明重新评估条件","review_question":"赛后复盘问题"}。`,
+    "你是世界杯纸上竞猜的主教练·裁决官。你必须给出有区分度、可执行、可复盘的虚拟模拟建议，不得只说小仓试验或泛泛观望。你不迎合任何一方，只汇总分歧、控制风险，并比较证据强弱、赔率隐含概率、市场结构和角色置信度。只讨论虚拟练习币，不提供真实资金建议，不承诺结果。只输出合法 JSON，所有自然语言必须为简体中文。",
+    `赔率快照：${inputJson}。五类独立角色意见：${JSON.stringify(agents)}。裁决规则：证据明显支持当前选择且至少三类角色信心较高时可虚拟买入；证据有优势但仍有关键分歧时小仓试验；只有证据不足、赔率明显不合理或风险无法描述时才建议观望。必须输出具体票型、执行步骤、替代方案和禁买点。请返回：{"decision":"虚拟买入、小仓试验或建议观望","summary":"综合裁决","opportunity_tags":["3到6个机会标签"],"disagreements":"角色之间最重要的分歧","virtual_stake_limit":0到500的整数,"recommended_virtual_stake":0到200的整数，建议观望时必须为0,"action_reason":"为什么采取该行动","preferred_ticket_structure":"建议采用的虚拟票型结构，例如单选、拆成两注、只做复盘观察","action_checklist":["3到6条执行步骤，每条必须具体"],"entry_condition":"执行该虚拟行动前需要满足的条件，观望时说明重新评估条件","alternative_view":"如果不选当前结果，最值得比较的反手或替代思路","avoid_list":["2到5条不要买的情形"],"review_question":"赛后复盘问题"}。`,
     panelDecisionSchema,
   );
 
   const averageConfidence = agents.reduce((sum, agent) => sum + agent.confidence, 0) / agents.length;
-  const promoteObservationToTrial = coordinator.decision === "建议观望" && averageConfidence >= 60;
-  const effectiveCoordinator = promoteObservationToTrial
-    ? {
-        ...coordinator,
-        decision: "小仓试验" as const,
-        virtual_stake_limit: Math.max(2, coordinator.virtual_stake_limit),
-        recommended_virtual_stake: 2,
-        action_reason: `实验策略覆盖机械观望：三位角色平均置信度为 ${averageConfidence.toFixed(1)}%，使用最低探索仓验证判断。原始裁决理由：${coordinator.action_reason}`,
-        entry_condition: "仅使用 2 练习币最低探索仓，并在真实赛果后复盘。",
-      }
-    : coordinator;
+  const strongAgentCount = agents.filter((agent) => agent.confidence >= 70).length;
+  const trialStake = averageConfidence >= 82 ? 30 : averageConfidence >= 74 ? 20 : averageConfidence >= 66 ? 10 : 4;
+  const promoteObservationToTrial = coordinator.decision === "建议观望" && averageConfidence >= 66 && strongAgentCount >= 2;
+  const promoteTrialToBuy = coordinator.decision === "小仓试验" && averageConfidence >= 82 && strongAgentCount >= 3;
+  let effectiveCoordinator = coordinator;
+  if (promoteTrialToBuy) {
+    effectiveCoordinator = {
+      ...coordinator,
+      decision: "虚拟买入" as const,
+      virtual_stake_limit: Math.max(30, coordinator.virtual_stake_limit),
+      recommended_virtual_stake: Math.max(20, coordinator.recommended_virtual_stake),
+      action_reason: `分层裁决升级为虚拟买入：五类角色平均置信度 ${averageConfidence.toFixed(1)}%，且 ${strongAgentCount} 类角色信心不低于 70%。仍按小额虚拟仓位执行，不扩大到真实资金。`,
+      preferred_ticket_structure: coordinator.preferred_ticket_structure || "单注当前选择，保留复盘记录。",
+    };
+  } else if (promoteObservationToTrial) {
+    effectiveCoordinator = {
+      ...coordinator,
+      decision: "小仓试验" as const,
+      virtual_stake_limit: Math.max(trialStake, coordinator.virtual_stake_limit),
+      recommended_virtual_stake: Math.max(trialStake, coordinator.recommended_virtual_stake),
+      action_reason: `观望改为有目的的小仓试验：五类角色平均置信度 ${averageConfidence.toFixed(1)}%，已有 ${strongAgentCount} 类角色给出可练习依据，用 ${trialStake} 练习币验证判断。`,
+      entry_condition: `仅使用 ${trialStake} 练习币以内的小仓，赛后必须复盘赔率判断、替代选择和实际比分。`,
+    };
+  } else if (coordinator.decision === "小仓试验") {
+    effectiveCoordinator = {
+      ...coordinator,
+      virtual_stake_limit: Math.max(trialStake, coordinator.virtual_stake_limit),
+      recommended_virtual_stake: Math.max(trialStake, coordinator.recommended_virtual_stake),
+    };
+  } else if (coordinator.decision === "虚拟买入") {
+    effectiveCoordinator = {
+      ...coordinator,
+      virtual_stake_limit: Math.max(30, coordinator.virtual_stake_limit),
+      recommended_virtual_stake: Math.max(20, coordinator.recommended_virtual_stake),
+    };
+  }
   const recommendedStake =
     effectiveCoordinator.decision === "建议观望"
       ? 0
