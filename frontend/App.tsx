@@ -1808,7 +1808,7 @@ export default function App() {
                   <View style={styles.matchMeta}><Text style={styles.panelTitle}>直接为 Agent 选择比赛</Text><Text style={styles.realOddsBadge}>真实胜平负赔率</Text></View>
                   <Text style={styles.muted}>选择一个比赛结果后会直接进入会审；会审完成后按上方设置自动购入。</Text>
                   {odds.length === 0 ? <Pressable style={styles.primaryButton} onPress={loadLiveData}><Text style={styles.primaryButtonText}>加载 2026 真实比赛</Text></Pressable> : futureOdds.length === 0 ? <Text style={styles.dataMessage}>当前赔率列表没有尚未开赛的比赛，Agent 不会建立赛后正式票。</Text> : (
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.matchSwitcherRow}>
+                    <View style={styles.agentSelectionGrid}>
                       {futureOdds.map((event) => (
                         <View key={event.external_event_id} style={styles.agentSelectionCard}>
                           <View style={styles.switchFlags}><Team name={event.home_team} flag={event.home_team_flag_url} /><Text style={styles.versus}>对阵</Text><Team name={event.away_team} flag={event.away_team_flag_url} /></View>
@@ -1820,7 +1820,7 @@ export default function App() {
                           ))}</View>
                         </View>
                       ))}
-                    </ScrollView>
+                    </View>
                   )}
                 </View>
                 <View style={styles.comparisonPanel}>
@@ -2160,7 +2160,8 @@ const styles = StyleSheet.create({
   matchSwitcherRow: { gap: 9, paddingRight: 10 },
   matchSwitcherGrid: { flexDirection: "row", flexWrap: "wrap", gap: 9 },
   matchSwitcherCard: { width: 250, maxWidth: "100%", backgroundColor: "#eef4f2", borderWidth: 1, borderColor: "#d7e0dd", borderRadius: 14, padding: 12, gap: 8 },
-  agentSelectionCard: { width: 330, backgroundColor: "#eef4f2", borderWidth: 1, borderColor: "#d7e0dd", borderRadius: 14, padding: 12, gap: 10 },
+  agentSelectionGrid: { flexDirection: "row", flexWrap: "wrap", gap: 9 },
+  agentSelectionCard: { flexGrow: 1, flexBasis: 320, maxWidth: "100%", backgroundColor: "#eef4f2", borderWidth: 1, borderColor: "#d7e0dd", borderRadius: 14, padding: 12, gap: 10 },
   matchSwitcherCardActive: { borderColor: "#0d7565", borderWidth: 3, backgroundColor: "#d9eee8" },
   switchFlags: { flexDirection: "row", alignItems: "center", gap: 5 },
   switchDate: { color: "#66736f", fontSize: 11, textAlign: "center" },
