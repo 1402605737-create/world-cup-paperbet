@@ -21,7 +21,7 @@ type Page = "首页" | "真实数据" | "比赛下单" | "虚拟模拟" | "Agent
 type Selection = "home" | "draw" | "away";
 type OrderWindow = "切换比赛" | "选择玩法" | "下单汇总" | "本场票据";
 type HomeWindow = "赛季概览" | "核心流程";
-type DataWindow = "2026 赔率" | "2026 比分" | "2022 复盘";
+type DataWindow = "2026 赔率" | "2026 赛程" | "2026 比分" | "2022 复盘";
 type SimulationWindow = "人机概览" | "建立模拟" | "我的票据" | "Agent 票据";
 type AgentWindow = "总览" | "待结算持仓" | "已结算记录";
 type AnalysisWindow = "当前会审" | "人机对比" | "会审历史";
@@ -88,6 +88,20 @@ type CurrentScore = {
   last_update: string | null;
   home_team_flag_url: string | null;
   away_team_flag_url: string | null;
+};
+
+type TournamentScheduleMatch = {
+  match_no: number;
+  stage: "32强赛" | "16强赛" | "四分之一决赛" | "半决赛" | "三四名决赛" | "决赛";
+  kickoff_date: string;
+  kickoff_time_note: string;
+  home_slot: string;
+  away_slot: string;
+  venue: string;
+  city: string;
+  country: string;
+  status: "官方占位赛程" | "待真实对阵确认";
+  source: string;
 };
 
 type ReplayMatch = {
@@ -435,9 +449,11 @@ export default function App() {
   const [matches, setMatches] = useState<Match[]>([]);
   const [odds, setOdds] = useState<Odds[]>([]);
   const [currentScores, setCurrentScores] = useState<CurrentScore[]>([]);
+  const [tournamentSchedule, setTournamentSchedule] = useState<TournamentScheduleMatch[]>([]);
   const [liveDataLoading, setLiveDataLoading] = useState(false);
   const [matchesMessage, setMatchesMessage] = useState("");
   const [oddsMessage, setOddsMessage] = useState("");
+  const [scheduleMessage, setScheduleMessage] = useState("");
   const [selectedBet, setSelectedBet] = useState<SelectedBet | null>(null);
   const [stake, setStake] = useState("25");
   const [reason, setReason] = useState("");
@@ -620,19 +636,28 @@ export default function App() {
     setLiveDataLoading(true);
     setMatchesMessage("");
     setOddsMessage("");
+    setScheduleMessage("");
     try {
-      const [matchesResponse, oddsResponse, scoresResponse] = await Promise.all([
+      const [matchesResponse, oddsResponse, scoresResponse, scheduleResponse] = await Promise.all([
         fetch(`${API_BASE}/api/matches`),
         fetch(`${API_BASE}/api/odds`),
         fetch(`${API_BASE}/api/current-scores`),
+        fetch(`${API_BASE}/api/tournament-schedule`),
       ]);
       const matchesPayload = await matchesResponse.json();
       const oddsPayload = await oddsResponse.json();
       const scoresPayload = await scoresResponse.json();
+      const schedulePayload = await scheduleResponse.json();
       if (matchesResponse.ok) setMatches(matchesPayload.matches || []);
       else setMatchesMessage(matchesPayload.error || "历史赛果暂不可用");
       if (oddsResponse.ok) setOdds(oddsPayload.odds || []);
       else setOddsMessage(oddsPayload.error || "2026 世界杯真实赔率暂不可用");
+      if (scheduleResponse.ok) {
+        setTournamentSchedule(schedulePayload.schedule || []);
+        setScheduleMessage(schedulePayload.message || "");
+      } else {
+        setScheduleMessage(schedulePayload.error || "2026 世界杯官方赛程暂不可用");
+      }
       if (scoresResponse.ok) {
         const scores = scoresPayload.scores || [];
         setCurrentScores(scores);
@@ -641,6 +666,7 @@ export default function App() {
     } catch {
       setMatchesMessage("真实数据服务暂时无法连接");
       setOddsMessage("真实数据服务暂时无法连接");
+      setScheduleMessage("真实数据服务暂时无法连接");
     } finally {
       setLiveDataLoading(false);
     }
@@ -1355,13 +1381,14 @@ export default function App() {
             <SectionTitle caption="当前主要体验为 2026 世界杯；2022 数据只用于历史复盘">2026 世界杯真实数据中心</SectionTitle>
             <Pressable style={styles.primaryButton} onPress={loadLiveData} disabled={liveDataLoading}><Text style={styles.primaryButtonText}>{liveDataLoading ? "正在刷新…" : "刷新真实数据"}</Text></Pressable>
             {liveDataLoading ? <ActivityIndicator color="#0d685a" size="large" /> : null}
-            <WindowTabs value={dataWindow} onChange={setDataWindow} items={[["2026 赔率", `2026 赔率 ${odds.length}`], ["2026 比分", `2026 比分 ${currentScores.length}`], ["2022 复盘", `2022 复盘 ${matches.length}`]]} />
+            <WindowTabs value={dataWindow} onChange={setDataWindow} items={[["2026 赔率", `2026 赔率 ${odds.length}`], ["2026 赛程", `2026 赛程 ${tournamentSchedule.length}`], ["2026 比分", `2026 比分 ${currentScores.length}`], ["2022 复盘", `2022 复盘 ${matches.length}`]]} />
             <View style={styles.notice}>
               <Text style={styles.noticeTitle}>当前赛事：2026 世界杯</Text>
               <Text style={styles.noticeText}>页面优先展示 2026 世界杯当前真实赔率、未来赛程，以及实时/近三天比分。页面底部另保留 2022 年世界杯 64 场完整赛果，仅用于已结束比赛复盘，不代表当前届次。</Text>
             </View>
             {matchesMessage ? <Text style={styles.dataMessage}>{matchesMessage}</Text> : null}
             {oddsMessage ? <Text style={styles.dataMessage}>{oddsMessage}</Text> : null}
+            {scheduleMessage ? <Text style={styles.dataMessage}>{scheduleMessage}</Text> : null}
             {dataWindow === "2026 赔率" ? (
             <>
             <SectionTitle caption={`${odds.length} 场可用于虚拟模拟`}>2026 世界杯当前真实赔率</SectionTitle>
@@ -1379,6 +1406,24 @@ export default function App() {
                   ))}
                 </View>
                 <Pressable style={styles.primaryButton} onPress={() => openOrderCenter(item)}><Text style={styles.primaryButtonText}>进入本场整合下单中心</Text></Pressable>
+            </View>
+            ))}
+            </>
+            ) : null}
+            {dataWindow === "2026 赛程" ? (
+            <>
+            <SectionTitle caption="6 月 28 日后的淘汰赛对阵未完全确定时，先显示官方占位赛程，不伪造国家名">2026 世界杯官方淘汰赛赛程</SectionTitle>
+            {tournamentSchedule.length === 0 ? <Text style={styles.dataMessage}>点击“刷新真实数据”加载 6 月 28 日后的官方淘汰赛占位赛程。</Text> : tournamentSchedule.map((match) => (
+              <View key={match.match_no} style={styles.scheduleCard}>
+                <View style={styles.matchMeta}><Text style={styles.matchStage}>M{match.match_no} · {match.stage}</Text><Text style={styles.replayBadge}>{match.status}</Text></View>
+                <Text style={styles.scheduleDate}>{new Date(`${match.kickoff_date}T00:00:00+08:00`).toLocaleDateString("zh-CN", { month: "long", day: "numeric", weekday: "long" })}</Text>
+                <View style={styles.scheduleSlots}>
+                  <Text style={styles.scheduleSlot}>{match.home_slot}</Text>
+                  <Text style={styles.versus}>对阵</Text>
+                  <Text style={styles.scheduleSlot}>{match.away_slot}</Text>
+                </View>
+                <Text style={styles.muted}>{match.city} · {match.country} · {match.venue}</Text>
+                <Text style={styles.muted}>{match.kickoff_time_note}</Text>
               </View>
             ))}
             </>
@@ -2099,6 +2144,10 @@ const styles = StyleSheet.create({
   noticeText: { color: "#6e571f", fontSize: 13, lineHeight: 20 },
   archiveNotice: { backgroundColor: "#edf1f0", borderWidth: 1, borderColor: "#c9d1ce", borderRadius: 16, padding: 16, gap: 5 },
   archiveNoticeTitle: { color: "#43534f", fontWeight: "900", fontSize: 14 },
+  scheduleCard: { backgroundColor: "#fffdf8", borderWidth: 1, borderColor: "#dedbd1", borderRadius: 18, padding: 17, gap: 11 },
+  scheduleDate: { color: "#173e37", fontSize: 20, fontWeight: "900" },
+  scheduleSlots: { flexDirection: "row", alignItems: "center", gap: 9 },
+  scheduleSlot: { flex: 1, color: "#0d685a", backgroundColor: "#e7f2ef", borderRadius: 12, padding: 12, textAlign: "center", fontSize: 15, fontWeight: "900" },
   panel: { backgroundColor: "#fffdf8", borderWidth: 1, borderColor: "#dedbd1", borderRadius: 20, padding: 18, gap: 14 },
   panelTitle: { color: "#173e37", fontSize: 16, fontWeight: "900" },
   inputLabel: { color: "#173e37", fontSize: 14, fontWeight: "800" },

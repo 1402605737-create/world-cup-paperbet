@@ -9,6 +9,7 @@ import {
 } from "./services/deepseekService.js";
 import { getWorldCupMatches, syncWorldCupResults } from "./services/sportsDataService.js";
 import { getWorldCupOdds, getWorldCupScores } from "./services/oddsDataService.js";
+import { getOfficialTournamentSchedule } from "./services/tournamentScheduleService.js";
 
 const app = express();
 app.disable("x-powered-by");
@@ -78,6 +79,13 @@ app.get("/api/matches", async (_request, response) => {
   } catch (error) {
     response.status(503).json({ error: error instanceof Error ? error.message : "真实赛事服务暂不可用" });
   }
+});
+
+app.get("/api/tournament-schedule", (_request, response) => {
+  response.json({
+    schedule: getOfficialTournamentSchedule(),
+    message: "6月28日后的淘汰赛为 FIFA 官方占位赛程；真实国家对阵将在小组赛结果确定后由赔率/比分数据更新。",
+  });
 });
 
 app.get("/api/cron/sync-results", async (request, response) => {
